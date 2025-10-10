@@ -1,0 +1,26 @@
+flask
+flask-cors
+gunicorn
+boto3
+requests
+flask-sqlalchemy
+psycopg2-binary
+PyJWT
+bcrypt
+flask_admin
+werkzeug
+wtforms==2.3.0
+flask-login
+flask-limiter
+flask-session
+sqlalchemy 
+numpy 
+pandas
+scikit-image 
+scipy 
+scikit-learn
+opencv-python-headless
+psutil
+# Production task queue with SQS
+celery[sqs]
+kombu[sqs]

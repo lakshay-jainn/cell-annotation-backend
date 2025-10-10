@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Model Processing Control</title>
+    <link
+      rel="stylesheet"
+      href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css"
+    />
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
+    <style>
+      .spinning {
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+      .processing-btn {
+        position: relative;
+      }
+      .processing-btn:disabled {
+        opacity: 0.6;
+      }
+    </style>
+  </head>
+  <body
+    data-has-processing-samples="{% if processing_samples|length > 0 %}true{% else %}false{% endif %}"
+  >
+    <nav class="navbar navbar-default" role="navigation">
+      <div class="container-fluid">
+        <div class="navbar-header">
+          <a class="navbar-brand" href="/admin/">Admin Panel</a>
+        </div>
+        <ul class="nav navbar-nav navbar-right">
+          <li><a href="/admin/">Dashboard</a></li>
+          <li><a href="/admin/logout">Logout</a></li>
+        </ul>
+      </div>
+    </nav>
+
+    <div class="container-fluid">
+      <h1>Model Processing Control</h1>
+
+      <!-- Background Tasks Status -->
+      {% if background_tasks %}
+      <div class="row">
+        <div class="col-md-12">
+          <div class="panel panel-info">
+            <div class="panel-heading">
+              <h2 class="panel-title">Background Processing Tasks</h2>
+            </div>
+            <div class="panel-body">
+              <table class="table table-sm">
+                <thead>
+                  <tr>
+                    <th>Task ID</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Started</th>
+                    <th>Result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for task in background_tasks %}
+                  <tr>
+                    <td><code>{{ task.id[:8] }}...</code></td>
+                    <td>
+                      <span class="badge badge-secondary">{{ task.type }}</span>
+                    </td>
+                    <td>
+                      {% if task.status == 'PENDING' %}
+                      <span class="badge badge-warning">Pending</span>
+                      {% elif task.status == 'STARTED' %}
+                      <span class="badge badge-info">Running</span>
+                      {% elif task.status == 'SUCCESS' %}
+                      <span class="badge badge-success">Completed</span>
+                      {% elif task.status == 'FAILURE' %}
+                      <span class="badge badge-danger">Failed</span>
+                      {% elif task.status == 'RETRY' %}
+                      <span class="badge badge-warning">Retrying</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {{ task.started_at.strftime('%H:%M:%S') if task.started_at
+                      else 'N/A' }}
+                    </td>
+                    <td>
+                      {% if task.result %} {{ task.result.get('message',
+                      'Success') if task.result is mapping else task.result }}
+                      {% elif task.error %}
+                      <small class="text-danger"
+                        >{{ task.error[:50] }}...</small
+                      >
+                      {% else %} Processing... {% endif %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="row">
+        <div class="col-md-12">
+          <div class="panel panel-info">
+            <div class="panel-heading">
+              <h2 class="panel-title">Processing Queue Status</h2>
+            </div>
+            <div class="panel-body">
+              <div class="row">
+                <div class="col-sm-3">
+                  <div
+                    class="well well-sm text-center"
+                    role="status"
+                    aria-label="Messages Available"
+                  >
+                    <h3>{{ queue_info.messages_available or 0 }}</h3>
+                    <small>Messages Available</small>
+                  </div>
+                </div>
+                <div class="col-sm-3">
+                  <div
+                    class="well well-sm text-center"
+                    role="status"
+                    aria-label="Messages Processing"
+                  >
+                    <h3>{{ queue_info.messages_in_flight or 0 }}</h3>
+                    <small>Processing Now</small>
+                  </div>
+                </div>
+                <div class="col-sm-3">
+                  <div
+                    class="well well-sm text-center"
+                    role="status"
+                    aria-label="Total Messages"
+                  >
+                    <h3>{{ queue_info.total_messages or 0 }}</h3>
+                    <small>Total in Queue</small>
+                  </div>
+                </div>
+                <div class="col-sm-3">
+                  <div
+                    class="well well-sm text-center"
+                    role="status"
+                    aria-label="Database Pending"
+                  >
+                    <h3>{{ processing_info.pending }}</h3>
+                    <small>DB Pending</small>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-md-6">
+          <div class="panel panel-warning">
+            <div class="panel-heading">
+              <h3 class="panel-title pending-title">
+                Pending Samples ({{ pending_samples|length }})
+              </h3>
+            </div>
+            <div class="panel-body" style="max-height: 400px; overflow-y: auto">
+              {% if pending_samples %}
+              <table class="table table-striped">
+                <thead>
+                  <tr>
+                    <th>Job ID</th>
+                    <th>Uploader</th>
+                    <th>Uploaded</th>
+                    <th>Status</th>
+                    <th>Download</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for sample in pending_samples %}
+                  <tr>
+                    <td>
+                      <code title="{{ sample.job_id }}"
+                        >{{ sample.job_id[:8] }}...</code
+                      >
+                    </td>
+                    <td>
+                      {% if sample.uploader %}
+                      <span title="{{ sample.uploader.email }}"
+                        >{{ sample.uploader.name }}</span
+                      >
+                      {% else %}
+                      <span class="text-muted">Unknown</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {{ sample.created_at.strftime('%m/%d %H:%M') if
+                      sample.created_at else 'N/A' }}
+                    </td>
+                    <td>
+                      {% if sample.display_status == 'completed' %}
+                      <span class="badge badge-success">Completed</span>
+                      {% elif sample.display_status == 'processing' %}
+                      <span class="badge badge-info">Processing</span>
+                      {% else %}
+                      <span class="badge badge-warning">Pending</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if sample.image_download_url %}
+                      <a
+                        href="{{ sample.image_download_url }}"
+                        target="_blank"
+                        class="btn btn-xs btn-default"
+                        title="Download original image"
+                      >
+                        <i class="glyphicon glyphicon-download"></i>
+                      </a>
+                      {% else %}
+                      <span class="text-muted">-</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if sample.display_status == 'completed' %}
+                      <span class="badge badge-success" aria-label="Completed"
+                        >✓ Completed</span
+                      >
+                      {% elif sample.display_status == 'processing' %}
+                      <!-- Processing state - disable button -->
+                      <button
+                        type="button"
+                        class="btn btn-sm btn-info processing-btn"
+                        disabled
+                        aria-label="Currently processing"
+                      >
+                        <i class="fa fa-spinner fa-spin" aria-hidden="true"></i>
+                        Processing...
+                      </button>
+                      {% else %}
+                      <!-- Pending state - show queue and process buttons -->
+                      <button
+                        type="button"
+                        class="btn btn-sm btn-warning queue-btn{% if sample.in_queue %} disabled{% endif %}"
+                        onclick="queueSingleSample('{{ sample.job_id }}')"
+                        aria-label="Queue sample {{ sample.job_id[:8] }}"
+                        {%
+                        if
+                        sample.in_queue
+                        %}
+                        style="
+                          margin-right: 4px;
+                          opacity: 0.5;
+                          cursor: not-allowed;
+                        "
+                        disabled
+                        title="Already in queue"
+                        {%
+                        else
+                        %}
+                        style="margin-right: 4px"
+                        title="Queue this sample"
+                        {%
+                        endif
+                        %}
+                        data-job-id="{{ sample.job_id }}"
+                      >
+                        {% if sample.in_queue %}Queued{% else %}Queue{% endif %}
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-sm btn-primary process-btn{% if not sample.in_queue %} disabled{% endif %}"
+                        onclick="processSingleSample('{{ sample.job_id }}')"
+                        aria-label="Process sample {{ sample.job_id[:8] }}"
+                        data-job-id="{{ sample.job_id }}"
+                        {%
+                        if
+                        not
+                        sample.in_queue
+                        %}
+                        disabled
+                        title="Queue this sample first"
+                        style="opacity: 0.5; cursor: not-allowed"
+                        {%
+                        else
+                        %}
+                        title="Process queued sample"
+                        {%
+                        endif
+                        %}
+                      >
+                        Process
+                      </button>
+                      {% endif %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+              {% else %}
+              <p>No pending samples.</p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+
+        <div class="col-md-6">
+          <div class="panel panel-info processing-panel-info">
+            <div class="panel-heading">
+              <h3 class="panel-title processing-title">
+                Currently Processing ({{ processing_samples|length }})
+              </h3>
+            </div>
+            <div class="panel-body" style="max-height: 400px; overflow-y: auto">
+              {% if processing_samples %}
+              <table class="table table-striped">
+                <thead>
+                  <tr>
+                    <th>Job ID</th>
+                    <th>Uploader</th>
+                    <th>Started</th>
+                    <th>Status</th>
+                    <th>Download</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for sample in processing_samples %}
+                  <tr>
+                    <td>
+                      <code title="{{ sample.job_id }}"
+                        >{{ sample.job_id[:8] }}...</code
+                      >
+                    </td>
+                    <td>
+                      {% if sample.uploader %}
+                      <span title="{{ sample.uploader.email }}"
+                        >{{ sample.uploader.name }}</span
+                      >
+                      {% else %}
+                      <span class="text-muted">Unknown</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {{ sample.updated_at.strftime('%m/%d %H:%M') if
+                      sample.updated_at else 'N/A' }}
+                    </td>
+                    <td>
+                      <span class="badge badge-info"
+                        >{{ sample.inference_status }}</span
+                      >
+                    </td>
+                    <td>
+                      {% if sample.image_download_url %}
+                      <a
+                        href="{{ sample.image_download_url }}"
+                        target="_blank"
+                        class="btn btn-xs btn-default"
+                        title="Download original image"
+                      >
+                        <i class="glyphicon glyphicon-download"></i>
+                      </a>
+                      {% else %}
+                      <span class="text-muted">-</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+              {% else %}
+              <p>No samples currently processing.</p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-md-12">
+          <div class="panel panel-success">
+            <div class="panel-heading">
+              <h3 class="panel-title completed-title">
+                Recently Completed (Last 10)
+              </h3>
+            </div>
+            <div class="panel-body" style="max-height: 300px; overflow-y: auto">
+              {% if completed_samples %}
+              <table class="table table-striped">
+                <thead>
+                  <tr>
+                    <th>Job ID</th>
+                    <th>Uploader</th>
+                    <th>Completed</th>
+                    <th>Status</th>
+                    <th>Download</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for sample in completed_samples %}
+                  <tr>
+                    <td>
+                      <code title="{{ sample.job_id }}"
+                        >{{ sample.job_id[:8] }}...</code
+                      >
+                    </td>
+                    <td>
+                      {% if sample.uploader %}
+                      <span title="{{ sample.uploader.email }}"
+                        >{{ sample.uploader.name }}</span
+                      >
+                      {% else %}
+                      <span class="text-muted">Unknown</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {{ sample.updated_at.strftime('%m/%d %H:%M') if
+                      sample.updated_at else 'N/A' }}
+                    </td>
+                    <td>
+                      <span class="badge badge-success"
+                        >{{ sample.inference_status }}</span
+                      >
+                    </td>
+                    <td>
+                      {% if sample.image_download_url %}
+                      <a
+                        href="{{ sample.image_download_url }}"
+                        target="_blank"
+                        class="btn btn-xs btn-default"
+                        title="Download original image"
+                      >
+                        <i class="glyphicon glyphicon-download"></i>
+                      </a>
+                      {% else %}
+                      <span class="text-muted">-</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+              {% else %}
+              <p>No completed samples.</p>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-md-12">
+          <div class="panel panel-default">
+            <div class="panel-heading">
+              <h2 class="panel-title">Processing Actions</h2>
+            </div>
+            <div class="panel-body">
+              <div class="alert alert-info" role="alert">
+                <strong>Note:</strong> Queue pending samples first, then process
+                the SQS queue.
+              </div>
+              <button
+                type="button"
+                class="btn btn-warning"
+                onclick="queueAllPending()"
+                aria-label="Queue all pending samples to SQS"
+                style="margin-right: 10px"
+              >
+                Queue All Pending
+              </button>
+              <button
+                type="button"
+                class="btn btn-primary sqs-btn"
+                onclick="processSQSMessages()"
+                aria-label="Process SQS messages from upload pipeline"
+                style="margin-right: 10px"
+              >
+                Process SQS Messages
+              </button>
+              <button
+                type="button"
+                class="btn btn-danger"
+                onclick="clearQueue()"
+                aria-label="Clear all messages from SQS queue"
+                style="margin-right: 10px"
+              >
+                Clear Queue
+              </button>
+              <button
+                class="btn btn-info"
+                onclick="location.reload()"
+                aria-label="Refresh page status"
+                type="button"
+              >
+                Refresh Status
+              </button>
+              <button
+                class="btn btn-warning"
+                onclick="cleanupStuckSamples()"
+                aria-label="Reset stuck processing samples"
+                type="button"
+              >
+                <i class="glyphicon glyphicon-wrench" aria-hidden="true"></i>
+                Cleanup Stuck Samples
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      "use strict";
+
+      let autoRefreshEnabled = false;
+      let autoRefreshInterval;
+
+      function updateStatus(data) {
+        console.log("Full AJAX Status Data:", data); // Debug log
+
+        // Update queue status counters - fix the mapping with better debugging
+
+        console.log("Processing info from API:", data.processing_info);
+
+        // Update sample counts in panel titles - use more robust selectors
+        const pendingTitle = document.querySelector(
+          ".panel-warning .pending-title"
+        );
+        if (pendingTitle) {
+          pendingTitle.textContent = `Pending Samples (${data.samples.pending.length})`;
+        }
+
+        // Find processing panel by looking for the one that contains processing samples table
+        const processingPanel = document.querySelector(
+          ".processing-panel-info"
+        );
+        if (processingPanel) {
+          const processingTitle =
+            processingPanel.querySelector(".processing-title");
+          if (processingTitle) {
+            processingTitle.textContent = `Currently Processing (${data.samples.processing.length})`;
+          }
+        }
+
+        // Find completed panel and update its title too
+        const completedPanel = document.querySelector(".panel-success");
+        if (completedPanel) {
+          const completedTitle =
+            completedPanel.querySelector(".completed-title");
+          if (completedTitle) {
+            completedTitle.textContent = `Recently Completed (${data.samples.completed.length})`;
+          }
+        }
+
+        // Update queue button states for pending samples
+        updateQueueButtons(data.samples.pending);
+
+        // Only update counters and queue status via AJAX
+        // Table updates are too complex - let them refresh naturally when status changes significantly
+
+        // Check if we should continue or stop refreshing
+        const hasProcessingSamples = data.samples.processing.length > 0;
+        if (hasProcessingSamples && !autoRefreshEnabled) {
+          startAutoRefresh();
+        } else if (!hasProcessingSamples && autoRefreshEnabled) {
+          stopAutoRefresh();
+          // When processing is complete, do one full page refresh to update everything
+          setTimeout(() => location.reload(), 2000);
+        }
+      }
+
+      function updateSampleTable(tableType, samples) {
+        // Don't update tables via AJAX - too complex with actions and state
+        // Instead, just update counts and let the existing auto-refresh handle table content
+        // This preserves all the original functionality like download buttons, uploader names, etc.
+        console.log(
+          `Would update ${tableType} table with ${samples.length} samples`
+        );
+
+        // Only update if there are significant changes to avoid unnecessary DOM manipulation
+        // The original page logic with display_status and action buttons is too complex for AJAX
+        return;
+      }
+
+      function getStatusBadge(status) {
+        switch (status) {
+          case "completed":
+            return '<span class="badge badge-success">Completed</span>';
+          case "processing":
+            return '<span class="badge badge-info">Processing</span>';
+          case "pending":
+            return '<span class="badge badge-warning">Pending</span>';
+          case "failed":
+            return '<span class="badge badge-danger">Failed</span>';
+          default:
+            return `<span class="badge badge-secondary">${status}</span>`;
+        }
+      }
+
+      function startAutoRefresh() {
+        if (!autoRefreshEnabled) {
+          autoRefreshInterval = setInterval(function () {
+            // Use AJAX to get status updates instead of full page reload
+            fetch("/admin/modelprocessing/status-api")
+              .then((response) => {
+                if (!response.ok)
+                  throw new Error("Network response was not ok");
+                return response.json();
+              })
+              .then((data) => {
+                console.log("AJAX Status Data:", data); // Debug log
+                console.log(
+                  "Processing samples count:",
+                  data.samples.processing.length
+                );
+                console.log(
+                  "Pending samples count:",
+                  data.samples.pending.length
+                );
+                console.log(
+                  "Completed samples count:",
+                  data.samples.completed.length
+                );
+                updateStatus(data);
+                console.log("Status updated via AJAX");
+              })
+              .catch((error) => {
+                console.error("Error fetching status:", error);
+                // Fallback to page reload if AJAX fails
+                location.reload();
+              });
+          }, 5000); // Check every 5 seconds
+          autoRefreshEnabled = true;
+          console.log("Auto-refresh enabled (AJAX mode)");
+        }
+      }
+
+      function stopAutoRefresh() {
+        if (autoRefreshEnabled) {
+          clearInterval(autoRefreshInterval);
+          autoRefreshEnabled = false;
+          console.log("Auto-refresh disabled");
+        }
+      }
+
+      function processSingleSample(sampleId) {
+        if (!confirm(`Process sample ${sampleId.substring(0, 8)}... ?`)) {
+          return;
+        }
+
+        // Send AJAX request
+        fetch("/admin/modelprocessing/process-sample", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ sample_id: sampleId }),
+        })
+          .then(function (response) {
+            if (!response.ok) {
+              throw new Error("HTTP " + response.status);
+            }
+            return response.json();
+          })
+          .then(function (data) {
+            if (data.status === "success") {
+              console.log("✅ Sample processing started, refreshing...");
+              // Refresh page to show processing state, monitoring will auto-start
+              setTimeout(() => location.reload(), 500);
+            } else {
+              alert("❌ " + (data.message || "Error occurred"));
+            }
+          })
+          .catch(function (error) {
+            console.error("Error:", error);
+            alert("❌ Error: " + error.message);
+          });
+      }
+
+      function processSQSMessages() {
+        if (!confirm("Process messages from SQS queue (upload pipeline)?")) {
+          return;
+        }
+
+        // Send AJAX request
+        fetch("/admin/modelprocessing/process-sqs", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        })
+          .then(function (response) {
+            console.log("SQS Response status:", response.status);
+            if (!response.ok) {
+              throw new Error(
+                "HTTP " + response.status + ": " + response.statusText
+              );
+            }
+            return response.json(); // Expect JSON response from the updated endpoint
+          })
+          .then(function (data) {
+            if (data.status === "success") {
+              console.log("✅ SQS processing started, refreshing...");
+              // Refresh page to show processing state, monitoring will auto-start
+            } else {
+              alert("❌ " + (data.message || "Error occurred"));
+            }
+          })
+          .catch(function (error) {
+            console.error("Error:", error);
+            alert("❌ Error: " + error.message);
+          });
+      }
+
+      function queueSingleSample(sampleId) {
+        if (!confirm(`Queue sample ${sampleId.substring(0, 8)}... to SQS?`)) {
+          return;
+        }
+
+        fetch("/admin/modelprocessing/queue-sample", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ sample_id: sampleId }),
+        })
+          .then(function (response) {
+            if (!response.ok) {
+              throw new Error("HTTP " + response.status);
+            }
+            return response.json();
+          })
+          .then(function (data) {
+            if (data.status === "success") {
+              alert("✅ Sample queued successfully!");
+              location.reload();
+            } else if (data.status === "info" && data.already_queued) {
+              alert("ℹ️ " + (data.message || "Sample already in queue"));
+              location.reload();
+            } else {
+              alert("❌ " + (data.message || "Error occurred"));
+            }
+          })
+          .catch(function (error) {
+            console.error("Error:", error);
+            alert("❌ Error: " + error.message);
+          });
+      }
+
+      function updateQueueButtons(pendingSamples) {
+        // Update queue button states based on API data
+        const queueButtons = document.querySelectorAll(".queue-btn");
+        const processButtons = document.querySelectorAll(".process-btn");
+
+        if (queueButtons.length === 0) {
+          return; // No pending samples
+        }
+
+        // Create a map of job_id to in_queue status
+        const queueStatusMap = {};
+        pendingSamples.forEach(function (sample) {
+          queueStatusMap[sample.job_id] = sample.in_queue || false;
+        });
+
+        // Update Queue button states
+        queueButtons.forEach(function (btn) {
+          const jobId = btn.dataset.jobId;
+          const inQueue = queueStatusMap[jobId];
+
+          if (inQueue) {
+            // Sample is already in queue - gray out Queue button
+            btn.disabled = true;
+            btn.classList.add("disabled");
+            btn.style.opacity = "0.5";
+            btn.style.cursor = "not-allowed";
+            btn.title = "Already in queue";
+            btn.innerHTML = "Queued";
+          } else {
+            // Sample not in queue - ensure Queue button is enabled
+            btn.disabled = false;
+            btn.classList.remove("disabled");
+            btn.style.opacity = "1";
+            btn.style.cursor = "pointer";
+            btn.title = "Queue this sample";
+            btn.innerHTML = "Queue";
+          }
+        });
+
+        // Update Process button states (opposite of Queue button)
+        processButtons.forEach(function (btn) {
+          const jobId = btn.dataset.jobId;
+          const inQueue = queueStatusMap[jobId];
+
+          if (inQueue) {
+            // Sample is in queue - enable Process button
+            btn.disabled = false;
+            btn.classList.remove("disabled");
+            btn.style.opacity = "1";
+            btn.style.cursor = "pointer";
+            btn.title = "Process queued sample";
+          } else {
+            // Sample not in queue - gray out Process button
+            btn.disabled = true;
+            btn.classList.add("disabled");
+            btn.style.opacity = "0.5";
+            btn.style.cursor = "not-allowed";
+            btn.title = "Queue this sample first";
+          }
+        });
+      }
+
+      function checkQueueStatus() {
+        // Fetch status API to get queue information
+        fetch("/admin/modelprocessing/status-api")
+          .then(function (response) {
+            if (!response.ok) {
+              throw new Error("HTTP " + response.status);
+            }
+            return response.json();
+          })
+          .then(function (data) {
+            // Update queue buttons with pending samples data
+            updateQueueButtons(data.samples.pending);
+          })
+          .catch(function (error) {
+            console.error("Error checking queue status:", error);
+          });
+      }
+
+      function queueAllPending() {
+        if (!confirm("Queue all pending samples to SQS?")) {
+          return;
+        }
+
+        fetch("/admin/modelprocessing/queue-all-pending", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        })
+          .then(function (response) {
+            if (!response.ok) {
+              throw new Error("HTTP " + response.status);
+            }
+            return response.json();
+          })
+          .then(function (data) {
+            if (data.status === "success" || data.status === "partial") {
+              let msg = `✅ Queued ${
+                data.queued_count || data.queued || 0
+              } sample(s) successfully!`;
+              if (data.skipped_count > 0) {
+                msg += `\nℹ️ ${data.skipped_count} sample(s) already in queue.`;
+              }
+              if (data.failed_count > 0 || data.failed > 0) {
+                msg += `\n⚠️ ${
+                  data.failed_count || data.failed
+                } sample(s) failed to queue.`;
+              }
+              alert(msg);
+              location.reload();
+            } else {
+              alert("❌ " + (data.message || "Error occurred"));
+            }
+          })
+          .catch(function (error) {
+            console.error("Error:", error);
+            alert("❌ Error: " + error.message);
+          });
+      }
+
+      function clearQueue() {
+        if (
+          !confirm(
+            "⚠️ Clear ALL messages from the SQS queue? This cannot be undone!"
+          )
+        ) {
+          return;
+        }
+
+        fetch("/admin/modelprocessing/clear-queue", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        })
+          .then(function (response) {
+            if (!response.ok) {
+              throw new Error("HTTP " + response.status);
+            }
+            return response.json();
+          })
+          .then(function (data) {
+            if (data.status === "success") {
+              alert("✅ Queue cleared successfully!");
+              location.reload();
+            } else {
+              alert("❌ " + (data.message || "Error occurred"));
+            }
+          })
+          .catch(function (error) {
+            console.error("Error:", error);
+            alert("❌ Error: " + error.message);
+          });
+      }
+
+      function cleanupStuckSamples() {
+        if (
+          !confirm(
+            'Reset samples that have been stuck in "processing" state for more than 10 minutes?'
+          )
+        ) {
+          return;
+        }
+
+        const btn = event.target.closest("button");
+        if (!btn) return;
+
+        const originalHTML = btn.innerHTML;
+        btn.innerHTML =
+          '<i class="glyphicon glyphicon-refresh spinning" aria-hidden="true"></i> Cleaning...';
+        btn.disabled = true;
+        btn.setAttribute("aria-disabled", "true");
+
+        fetch("/admin/cleanup-stuck-samples", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        })
+          .then(function (response) {
+            console.log("Response status:", response.status);
+            if (!response.ok) {
+              throw new Error(
+                "HTTP " + response.status + ": " + response.statusText
+              );
+            }
+            return response.json();
+          })
+          .then(function (data) {
+            console.log("Response data:", data);
+            if (data.status === "success") {
+              alert("✅ " + (data.message || "Cleanup completed successfully"));
+              location.reload(); // Refresh to show updated status
+            } else {
+              alert("❌ Cleanup failed: " + (data.message || "Unknown error"));
+            }
+          })
+          .catch(function (error) {
+            console.error("Fetch error:", error);
+            alert("❌ Error: " + error.message);
+          })
+          .finally(function () {
+            // Restore button state
+            btn.innerHTML = originalHTML;
+            btn.disabled = false;
+            btn.removeAttribute("aria-disabled");
+          });
+      }
+
+      // Initialize when DOM is ready
+      document.addEventListener("DOMContentLoaded", function () {
+        // Auto-enable refresh if samples are processing
+        const hasProcessingSamples =
+          document.body.dataset.hasProcessingSamples === "true";
+        if (hasProcessingSamples) {
+          startAutoRefresh();
+        } else {
+          stopAutoRefresh();
+        }
+
+        // Queue status is now included in initial page render from server
+        // AJAX auto-refresh will keep it updated automatically
+        // No need for separate checkQueueStatus() call on load
+
+        // Individual process buttons now use AJAX - no form submission handlers needed
+
+        // SQS processing is now handled by AJAX - no form submission needed
+      });
+    </script>
+  </body>
+</html>
