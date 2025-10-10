@@ -23,7 +23,7 @@ REGION = os.environ.get("AWS_REGION")
 ENDPOINT = os.environ.get("AWS_ENDPOINT_URL")
 
 if ENDPOINT:
-    sqs = boto3.client("sqs", region_name=REGION, endpoint_url=ENDPOINT)
+    sqs = boto3.client("sqs", region_name=REGION)
 else:
     sqs = boto3.client("sqs", region_name=REGION)
 

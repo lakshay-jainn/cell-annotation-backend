@@ -10,7 +10,7 @@ S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME")
 FRONTEND_URL = os.environ.get("FRONTEND_URL")
 # Initialize s3 client once
 if ENDPOINT:
-    s3_client = boto3.client("s3", region_name=REGION, endpoint_url=ENDPOINT)
+    s3_client = boto3.client("s3", region_name=REGION)
 else:
     s3_client = boto3.client("s3", region_name=REGION)
 
