@@ -128,7 +128,7 @@ def create_app():
         print("� Creating database tables...", flush=True)
         try:
             # db.drop_all()
-            db.create_all()
+            # db.create_all()
             print("✅ Database tables created successfully", flush=True)
         except Exception as e:
             print(f"❌ Error creating database tables: {e}", flush=True)
