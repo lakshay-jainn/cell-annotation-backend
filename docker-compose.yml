@@ -18,7 +18,7 @@ services:
       - RECAPTCHA_SECRET=${RECAPTCHA_SECRET}
       - MODEL_API_URL=${MODEL_API_URL}
       - HF_API_KEY=${HF_API_KEY}
-    command: gunicorn --preload --bind 0.0.0.0:8000 --workers 2 server:app
+    command: gunicorn --bind 0.0.0.0:8000 --workers 2 server:app
     ports:
       - "${WEB_PORT}:8000"
     volumes:
