@@ -307,10 +307,10 @@ def run_init():
 
 # create app via init function (this runs at import time)
 
-
+# Useful for local/dev runs: start the Flask dev server
+app = run_init()
 
 def main():
-    # Useful for local/dev runs: start the Flask dev server
-    app = run_init()
+
     print("▶️ Starting dev server on 0.0.0.0:8000", flush=True)
     app.run(host="0.0.0.0", port=8000, debug=False)
