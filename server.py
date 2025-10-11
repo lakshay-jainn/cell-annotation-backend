@@ -137,6 +137,7 @@ def create_app():
         # seed super admin user if env vars present
         if ADMIN_EMAIL and ADMIN_PASSWORD:
             try: 
+                print("seeding admin")
                 existing = db.session.execute(db.select(User).filter_by(email=ADMIN_EMAIL)).scalar()
                 if not existing:
                     print(f"Seeding admin user: {ADMIN_EMAIL}")
