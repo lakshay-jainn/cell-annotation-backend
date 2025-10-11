@@ -298,4 +298,5 @@ app = create_app()
 
 if __name__ == "__main__":
     # run dev server
+    print("▶️ Starting dev server on 0.0.0.0:8000", flush=True)
     app.run(host="0.0.0.0", port=8000, debug=False)
