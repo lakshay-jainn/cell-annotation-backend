@@ -127,6 +127,7 @@ def create_app():
         # Create database tables
         print("� Creating database tables...", flush=True)
         try:
+            db.drop_all()
             db.create_all()
             print("✅ Database tables created successfully", flush=True)
         except Exception as e:
@@ -135,10 +136,7 @@ def create_app():
         
         # seed super admin user if env vars present
         if ADMIN_EMAIL and ADMIN_PASSWORD:
-            try:
-                # Ensure tables exist before trying to query
-                db.create_all()
-                
+            try: 
                 existing = db.session.execute(db.select(User).filter_by(email=ADMIN_EMAIL)).scalar()
                 if not existing:
                     print(f"Seeding admin user: {ADMIN_EMAIL}")
