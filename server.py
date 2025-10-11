@@ -124,23 +124,23 @@ def create_app():
         
         print("🔧 AWS infrastructure check complete", flush=True)
         
-        # # Create database tables
-        # print("� Creating database tables...", flush=True)
-        # try:
-        #     # db.drop_all()
-        #     # db.create_all()
-        #     print("✅ Database tables created successfully", flush=True)
-        # except Exception as e:
-        #     print(f"❌ Error creating database tables: {e}", flush=True)
-        #     raise
+        # Create database tables
+        print("� Creating database tables...", flush=True)
+        try:
+            # db.drop_all()
+            db.create_all()
+            print("✅ Database tables created successfully", flush=True)
+        except Exception as e:
+            print(f"❌ Error creating database tables: {e}", flush=True)
+            raise
         
         # seed super admin user if env vars present
         if ADMIN_EMAIL and ADMIN_PASSWORD:
             try: 
-                print("seeding admin")
+                print("seeding admin", flush=True)
                 existing = db.session.execute(db.select(User).filter_by(email=ADMIN_EMAIL)).scalar()
                 if not existing:
-                    print(f"Seeding admin user: {ADMIN_EMAIL}")
+                    print(f"Seeding admin user: {ADMIN_EMAIL}", flush=True)
                     hashed = hash_password(ADMIN_PASSWORD)
                     admin_user = User(
                         name="Super Admin",
@@ -152,11 +152,11 @@ def create_app():
                     )
                     db.session.add(admin_user)
                     db.session.commit()
-                    print("Admin user created.")
+                    print("Admin user created.", flush=True)
                 else:
-                    print("Admin user already exists.")
+                    print("Admin user already exists.", flush=True)
             except Exception as e:
-                print(f"⚠️  Warning: Could not seed admin user: {e}")
+                print(f"⚠️  Warning: Could not seed admin user: {e}", flush=True)
                 # Don't fail the application if seeding fails
                 db.session.rollback()
 
