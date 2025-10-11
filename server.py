@@ -124,15 +124,15 @@ def create_app():
         
         print("🔧 AWS infrastructure check complete", flush=True)
         
-        # Create database tables
-        print("� Creating database tables...", flush=True)
-        try:
-            # db.drop_all()
-            # db.create_all()
-            print("✅ Database tables created successfully", flush=True)
-        except Exception as e:
-            print(f"❌ Error creating database tables: {e}", flush=True)
-            raise
+        # # Create database tables
+        # print("� Creating database tables...", flush=True)
+        # try:
+        #     # db.drop_all()
+        #     # db.create_all()
+        #     print("✅ Database tables created successfully", flush=True)
+        # except Exception as e:
+        #     print(f"❌ Error creating database tables: {e}", flush=True)
+        #     raise
         
         # seed super admin user if env vars present
         if ADMIN_EMAIL and ADMIN_PASSWORD:
