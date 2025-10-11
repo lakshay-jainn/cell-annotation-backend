@@ -293,10 +293,23 @@ def create_app():
 
     return app
 
-# create app
-app = create_app()
+# --- Run a single initialization & return the app object ---
+def run_init():
+    """
+    This function ensures initialization runs once (and prints flush immediately).
+    We call create_app() here and return the app object.
+    """
+    print("INIT: Starting application initialization...", flush=True)
+    app_obj = create_app()
+    print("INIT: Application initialization finished.", flush=True)
+    return app_obj
 
-if __name__ == "__main__":
-    # run dev server
+
+# create app via init function (this runs at import time)
+app = run_init()
+
+
+def main():
+    # Useful for local/dev runs: start the Flask dev server
     print("▶️ Starting dev server on 0.0.0.0:8000", flush=True)
     app.run(host="0.0.0.0", port=8000, debug=False)
