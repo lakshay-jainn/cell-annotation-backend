@@ -1039,7 +1039,7 @@ def detect_from_selected_endpoint(decoded_token):
         logger.info(f"detect_from_selected_endpoint: Created suggestions list with {len(suggestions_list)} items")
         
         # Clean up candidates list - no longer needed
-        del candidates
+        
         del selected_centroids
 
         selection_debug = {
@@ -1049,7 +1049,7 @@ def detect_from_selected_endpoint(decoded_token):
             'target': target,
             'exclusion_radius': 5  # Fixed 5px exclusion radius
         }
-
+        del candidates
         logger.info(f"detect_from_selected_endpoint: Final suggestions list: {len(suggestions_list)} cells")
 
         # Create CSV response
