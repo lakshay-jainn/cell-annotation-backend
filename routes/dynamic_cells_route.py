@@ -1049,7 +1049,6 @@ def detect_from_selected_endpoint(decoded_token):
             'target': target,
             'exclusion_radius': 5  # Fixed 5px exclusion radius
         }
-        del candidates
         logger.info(f"detect_from_selected_endpoint: Final suggestions list: {len(suggestions_list)} cells")
 
         # Create CSV response
