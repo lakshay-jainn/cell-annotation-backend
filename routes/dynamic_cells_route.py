@@ -6,15 +6,13 @@ import pandas as pd
 import cv2
 import logging
 import io
-# Removed import: from .cells_route import fast_detect_centroids (cells_route.py file missing)
-try:
-    import boto3
-except Exception:
-    boto3 = None
-
+import boto3
 from utilities.auth_utility import protected
 from utilities.logging_utility import ActivityLogger
 from db.models import Sample
+from PIL import Image
+import os
+import tempfile
 
 logger = logging.getLogger(__name__)
 
@@ -36,30 +34,47 @@ def parse_annotations_csv(text_or_bytes):
     return df
 
 def load_image_from_request():
-    """Unified image loading from either file upload or S3"""
+    """Unified image loading from either file upload or S3 — memory-safe via temporary files."""
     if 'image' in request.files:
-        # Load from uploaded file
+        # Load from uploaded file using a temporary file instead of .read()
         img_file = request.files['image']
-        in_memory = img_file.read()
-        arr = np.frombuffer(in_memory, np.uint8)
-        return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".img") as tmp:
+            img_file.save(tmp.name)
+            tmp_path = tmp.name
+
+        # Decode directly from disk (low memory)
+        image = cv2.imread(tmp_path, cv2.IMREAD_COLOR)
+
+        # Clean up temp file
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+        return image
 
     elif 's3_object_key' in request.form:
-        # Load from S3
+        # Load from S3 to temporary file
         s3_object_key = request.form['s3_object_key']
-        import boto3
         from utilities.aws_utility import s3_client, S3_BUCKET_NAME
 
-        s3_response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_object_key)
-        image_data = s3_response['Body'].read()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".img") as tmp:
+            s3_client.download_fileobj(Bucket=S3_BUCKET_NAME, Key=s3_object_key, Fileobj=tmp)
+            tmp_path = tmp.name
 
-        from PIL import Image
-        pil_image = Image.open(io.BytesIO(image_data))
-        image = np.array(pil_image)
+        # Open via Pillow (then convert)
+        with Image.open(tmp_path) as pil_image:
+            image = np.array(pil_image)
 
-        # Convert RGB to BGR for OpenCV
+        # Convert RGB → BGR for OpenCV
         if len(image.shape) == 3 and image.shape[2] == 3:
-            image = image[:, :, ::-1]  # RGB to BGR
+            image = image[:, :, ::-1]
+
+        # Clean up temp file
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
 
         return image
 
