@@ -59,33 +59,34 @@ def load_image_from_request():
         return image
 
     elif 's3_object_key' in request.form:
-        # Load from S3 to temporary file
-        logger.info("load_image_from_request: Loading from S3")
-        s3_object_key = request.form['s3_object_key']
-        logger.info(f"load_image_from_request: S3 key: {s3_object_key}")
-        from utilities.aws_utility import s3_client, S3_BUCKET_NAME
+            logger.info("load_image_from_request: Loading from S3")
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".img") as tmp:
-            s3_client.download_fileobj(Bucket=S3_BUCKET_NAME, Key=s3_object_key, Fileobj=tmp)
-            tmp_path = tmp.name
+            s3_object_key = request.form['s3_object_key']
+            logger.info(f"load_image_from_request: S3 key: {s3_object_key}")
 
-        # Open via Pillow (then convert)
-        with Image.open(tmp_path) as pil_image:
-            image = np.array(pil_image)
+            from utilities.aws_utility import s3_client, S3_BUCKET_NAME
+            import os
 
-        # Convert RGB → BGR for OpenCV
-        if len(image.shape) == 3 and image.shape[2] == 3:
-            image = image[:, :, ::-1]
-        
-        logger.info(f"load_image_from_request: Image loaded from S3, shape: {image.shape if image is not None else 'None'}")
+            # Extract file extension from S3 key (fallback to .img)
+            _, ext = os.path.splitext(s3_object_key)
+            suffix = ext if ext else ".img"
 
-        # Clean up temp file
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
+            # Stream S3 file directly to temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                s3_client.download_fileobj(Bucket=S3_BUCKET_NAME, Key=s3_object_key, Fileobj=tmp)
+                tmp_path = tmp.name
 
-        return image
+            # Decode directly from disk (OpenCV handles many formats natively)
+            image = cv2.imread(tmp_path, cv2.IMREAD_COLOR)
+            logger.info(f"load_image_from_request: Image loaded from S3, shape: {image.shape if image is not None else 'None'}")
+
+            # Clean up temp file
+            try:
+                os.unlink(tmp_path)
+            except Exception as e:
+                logger.warning(f"Failed to delete temp file {tmp_path}: {e}")
+
+            return image
 
     logger.warning("load_image_from_request: No image source found")
     return None
