@@ -24,12 +24,14 @@ MAX_RESULTS = 500
 # ----------------------
 # Helpers
 # ----------------------
-# AFTER: Low memory usage and much faster
+
 from scipy import ndimage
+
 
 def _calculate_polygon_properties_vectorized(polygons, full_hsv):
     """
     Calculates area, roundness, and mean HSV for a list of polygons using vectorized operations.
+    This is highly memory-efficient as it avoids creating large intermediate arrays.
     
     Returns a list of property dictionaries.
     """
@@ -37,35 +39,29 @@ def _calculate_polygon_properties_vectorized(polygons, full_hsv):
         return []
 
     image_shape = full_hsv.shape[:2]
-    num_polygons = len(polygons)
-
-    # Create a single mask where each polygon is filled with a unique ID (1, 2, 3...)
-    # Use np.int32 for the mask to support many polygons.
+    
+    # Use np.int32 for the mask to support many polygons (>255).
     polygon_id_mask = np.zeros(image_shape, dtype=np.int32)
     
-    # Store geometric properties calculated in the same loop to be efficient
     geo_properties = []
     valid_polygon_indices = []
 
     for i, polygon in enumerate(polygons):
         poly_id = i + 1
         if not polygon or len(polygon) < 3:
-            geo_properties.append({'area': 0, 'roundness': 0, 'bbox': [0,0,0,0], 'centroid': (0,0)})
+            # Add a placeholder for consistent list length
+            geo_properties.append(None)
             continue
 
         poly_np = np.array(polygon, dtype=np.int32)
         cv2.fillPoly(polygon_id_mask, [poly_np], poly_id)
         
         area = cv2.contourArea(poly_np)
-        roundness = calculate_roundness(poly_np)
+        roundness = calculate_roundness(poly_np) # Assuming you have this helper
         x, y, w, h = cv2.boundingRect(poly_np)
         
         M = cv2.moments(poly_np)
-        if M["m00"] != 0:
-            cx = int(M["m10"] / M["m00"])
-            cy = int(M["m01"] / M["m00"])
-        else:
-            cx, cy = x + w//2, y + h//2
+        cx, cy = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])) if M["m00"] != 0 else (x + w//2, y + h//2)
 
         geo_properties.append({'area': area, 'roundness': roundness, 'bbox': [x, y, x+w, y+h], 'centroid': (cx, cy)})
         valid_polygon_indices.append(poly_id)
@@ -73,17 +69,20 @@ def _calculate_polygon_properties_vectorized(polygons, full_hsv):
     if not valid_polygon_indices:
         return []
 
-    # Use scipy.ndimage.mean to calculate the mean HSV for ALL polygons in ONE pass
-    # This is extremely fast and memory-efficient.
-    # The result is a list where each item is the mean for the corresponding polygon ID.
-    # e.g., mean_hsvs[0] is for poly_id 1, mean_hsvs[1] is for poly_id 2, etc.
-    logger.info(f"Calculating mean HSV for {len(valid_polygon_indices)} polygons vectorially...")
-    mean_hsvs = ndimage.mean(full_hsv, labels=polygon_id_mask, index=valid_polygon_indices)
+    # --- FIX IS HERE ---
+    # Calculate the mean for each channel separately, as the mask is 2D and the image is 3D.
+    mean_h = ndimage.mean(full_hsv[:, :, 0], labels=polygon_id_mask, index=valid_polygon_indices)
+    mean_s = ndimage.mean(full_hsv[:, :, 1], labels=polygon_id_mask, index=valid_polygon_indices)
+    mean_v = ndimage.mean(full_hsv[:, :, 2], labels=polygon_id_mask, index=valid_polygon_indices)
+    
+    # Zip the results together into a list of (h, s, v) tuples
+    mean_hsvs = list(zip(mean_h, mean_s, mean_v))
+    # --- END OF FIX ---
     
     # Combine geometric and color properties
     all_properties = []
     for i, poly_id in enumerate(valid_polygon_indices):
-        props = geo_properties[poly_id - 1]
+        props = geo_properties[poly_id - 1] # Get pre-calculated geometry
         props['h_mean'], props['s_mean'], props['v_mean'] = mean_hsvs[i]
         all_properties.append(props)
         
