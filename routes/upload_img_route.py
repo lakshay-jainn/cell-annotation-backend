@@ -25,6 +25,8 @@ def upload_img(decoded_token):
     user_id = decoded_token.get("user_id")
     user_role = decoded_token.get("role")
     
+    current_app.logger.info(f"Upload request received - user_id: {user_id}, user_role: {user_role}")
+    
     ActivityLogger.log_workflow_step(
         user_id=user_id,
         user_role=user_role,
@@ -35,6 +37,7 @@ def upload_img(decoded_token):
     
     print(decoded_token)
     if decoded_token["role"] != "UPLOADER":
+        current_app.logger.warning(f"Unauthorized upload attempt - user_id: {user_id}, role: {user_role}")
         ActivityLogger.log_activity(
             user_id=user_id,
             user_role=user_role,
@@ -47,6 +50,7 @@ def upload_img(decoded_token):
 
     # Validate file presence
     if 'image' not in request.files:
+        current_app.logger.error("No file part 'image' in request.files")
         ActivityLogger.log_activity(
             user_id=user_id,
             user_role=user_role,
@@ -58,6 +62,7 @@ def upload_img(decoded_token):
 
     file = request.files['image']
     if file.filename == '':
+        current_app.logger.error("Empty filename in upload request")
         ActivityLogger.log_activity(
             user_id=user_id,
             user_role=user_role,
@@ -77,8 +82,11 @@ def upload_img(decoded_token):
     stain = request.form.get("stain")
     camera = request.form.get("camera")
     entered_by = request.form.get("entered_by", None)
+    
+    current_app.logger.info(f"Form data - patient_id: {user_typed_patient_id}, node_station: {node_station}, needle_size: {needle_size}, filename: {file.filename}")
 
     if not user_typed_patient_id:
+        current_app.logger.error("Missing required field: Patient ID")
         ActivityLogger.log_activity(
             user_id=user_id,
             user_role=user_role,
@@ -89,9 +97,11 @@ def upload_img(decoded_token):
         return jsonify({"message": "Patient ID is required"}), 400
 
     # Handle patient creation/lookup
+    current_app.logger.info(f"Looking up patient with user_typed_id: {user_typed_patient_id}")
     patient = Patient.query.filter_by(user_typed_id=user_typed_patient_id).first()
     if not patient:
         # Create new patient
+        current_app.logger.info(f"Creating new patient with user_typed_id: {user_typed_patient_id}")
         patient = Patient(user_typed_id=user_typed_patient_id)
         try:
             db.session.add(patient)
@@ -119,6 +129,7 @@ def upload_img(decoded_token):
     else:
         # If patient exists and has completed annotations, reset completion status
         # because new slides are being added that need to be annotated
+        current_app.logger.info(f"Patient exists: {user_typed_patient_id}, checking for completed annotations")
         try:
             # Find all patient annotations that are marked as completed for this patient
             completed_patient_annotations = PatientAnnotation.query.filter_by(
@@ -166,6 +177,7 @@ def upload_img(decoded_token):
 
     # Create job_id (serves as sample id)
     job_id = str(uuid.uuid4())
+    current_app.logger.info(f"Generated job_id: {job_id}")
 
     # Safely extract extension; default to .jpg if missing
     _, ext = os.path.splitext(file.filename or "")
@@ -175,8 +187,10 @@ def upload_img(decoded_token):
     # S3 layout: uploads/<job_id>/original<ext>
     s3_prefix = f"uploads/original/{job_id}/"
     s3_object_key = f"{s3_prefix}original{ext}"
+    current_app.logger.info(f"S3 object key: {s3_object_key}")
 
     # Strip EXIF data before uploading to S3
+    current_app.logger.info(f"Starting EXIF stripping for job_id: {job_id}")
     try:
         # Read image file
         file.stream.seek(0)  # Reset stream position
@@ -201,6 +215,7 @@ def upload_img(decoded_token):
         
         clean_file = FileWrapper(img_buffer)
         
+        current_app.logger.info(f"EXIF stripping successful - job_id: {job_id}, format: {img_format}, mode: {clean_img.mode}")
         ActivityLogger.log_workflow_step(
             user_id=user_id,
             user_role=user_role,
@@ -223,8 +238,10 @@ def upload_img(decoded_token):
         clean_file = file
 
     # Upload file to S3
+    current_app.logger.info(f"Starting S3 upload - bucket: {S3_BUCKET_NAME}, key: {s3_object_key}")
     try:
         upload_to_s3(S3_BUCKET_NAME, clean_file, s3_object_key)
+        current_app.logger.info(f"S3 upload successful - job_id: {job_id}, s3_key: {s3_object_key}")
         ActivityLogger.log_workflow_step(
             user_id=user_id,
             user_role=user_role,
@@ -233,6 +250,7 @@ def upload_img(decoded_token):
             step_data={"job_id": job_id, "s3_key": s3_object_key}
         )
     except Exception as e:
+        current_app.logger.error(f"S3 upload failed - job_id: {job_id}, error: {str(e)}", exc_info=True)
         ActivityLogger.log_activity(
             user_id=user_id,
             user_role=user_role,
@@ -244,6 +262,7 @@ def upload_img(decoded_token):
         return jsonify({"message": "S3 upload failed", "details": str(e)}), 500
 
     # Persist minimal DB row
+    current_app.logger.info(f"Creating sample record - job_id: {job_id}, patient_id: {patient.patient_id}")
     sample = Sample(
         job_id=job_id,
         patient_id=patient.patient_id,  # Link to the patient
@@ -261,6 +280,7 @@ def upload_img(decoded_token):
     try:
         db.session.add(sample)
         db.session.commit()
+        current_app.logger.info(f"Sample record saved successfully - job_id: {job_id}")
         ActivityLogger.log_workflow_step(
             user_id=user_id,
             user_role=user_role,
@@ -284,6 +304,7 @@ def upload_img(decoded_token):
 
     # DO NOT auto-enqueue - let admin manually queue samples
     # This gives better control over the processing pipeline
+    current_app.logger.info(f"Upload completed successfully - job_id: {job_id}, patient_id: {patient.patient_id}, s3_key: {s3_object_key}")
     
     ActivityLogger.log_workflow_step(
         user_id=user_id,
