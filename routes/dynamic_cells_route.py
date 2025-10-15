@@ -885,9 +885,6 @@ def detect_from_selected_endpoint(decoded_token):
         #     return jsonify({"error": "Failed to extract properties from selected cells"}), 400
               # Precompute full HSV image once. It will be reused for candidate filtering.
 
-        logger.info(f"detect_from_selected_endpoint: Converting image to HSV (shape: {image.shape})")
-        
-        logger.info(f"detect_from_selected_endpoint: HSV conversion complete")
         # selected_properties = _calculate_polygon_properties_vectorized(selected_polygons, full_hsv)
         # selected_chunk_size = get_dynamic_chunk_size(image.shape[:2], len(selected_polygons))
         
@@ -898,7 +895,9 @@ def detect_from_selected_endpoint(decoded_token):
                 # Call the safe, one-by-one method
                 selected_properties = _calculate_properties_iterative(selected_polygons, image)
         else:
+            logger.info(f"detect_from_selected_endpoint: Converting image to HSV (shape: {image.shape})")
             full_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+            logger.info(f"detect_from_selected_endpoint: HSV conversion complete")
             selected_properties = _calculate_polygon_properties_vectorized(selected_polygons,full_hsv)
 
         logger.info(f"detect_from_selected_endpoint: Successfully extracted properties from {len(selected_properties)} selected cells")
@@ -1082,7 +1081,7 @@ def detect_from_selected_endpoint(decoded_token):
 
         # Clean up prefiltered polygons and full_hsv - no longer needed
         del prefiltered_polygons
-        if num_pixels > LARGE_IMAGE_PIXEL_THRESHOLD:
+        if num_pixels <= LARGE_IMAGE_PIXEL_THRESHOLD:
             del full_hsv
         logger.info(f"detect_from_selected_endpoint: Cleaned up HSV image and prefiltered data")
         
