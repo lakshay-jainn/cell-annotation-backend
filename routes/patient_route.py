@@ -87,10 +87,10 @@ def get_patients(decoded_token):
             annotated_samples = len(annotated_sample_ids)
             
             # Check completion status based on sample annotations AND patient annotation
-            samples_completed = (annotated_samples == total_samples and total_samples > 0)
-            patient_annotation_completed = user_patient_annotation and user_patient_annotation.annotation_completed
-            is_completed = samples_completed and patient_annotation_completed
-
+            samples_completed = bool(annotated_samples == total_samples and total_samples > 0)
+            patient_annotation_completed = bool(user_patient_annotation and bool(getattr(user_patient_annotation, "annotation_completed", False)))
+            is_completed = bool(samples_completed and patient_annotation_completed)
+            created_at_val = patient.created_at if getattr(patient, "created_at", None) is not None else datetime.utcfromtimestamp(0)
             patient_data = {
                 "patient_id": patient.patient_id,
                 "user_typed_id": patient.user_typed_id,
@@ -102,7 +102,7 @@ def get_patients(decoded_token):
                 "total_samples": total_samples,
                 "annotated_samples": annotated_samples,
                 "progress_percentage": (annotated_samples / total_samples * 100) if total_samples > 0 else 0,
-                "created_at": patient.created_at,
+                "created_at": created_at_val,
                 # Add cell count summary for completed patients
                 "cell_summary": get_patient_cell_summary(patient.patient_id, decoded_token["user_id"]) if is_completed else None
             }
