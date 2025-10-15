@@ -196,15 +196,14 @@ def upload_img(decoded_token):
         file.stream.seek(0)  # Reset stream position
         img = Image.open(file.stream)
         
-        # Create a new image with the same pixels but no EXIF/metadata
-        clean_img = Image.new(img.mode, img.size)
-        clean_img.putdata(list(img.getdata()))
-        
-        # Save to bytes buffer
+        # Save to bytes buffer without EXIF data (memory-efficient)
         img_buffer = io.BytesIO()
         # Preserve original format if possible, default to JPEG
         img_format = img.format if img.format else 'JPEG'
-        clean_img.save(img_buffer, format=img_format, quality=95)
+        
+        # Save without exif data by not including exif parameter
+        # This is much more memory efficient than getdata() approach
+        img.save(img_buffer, format=img_format, quality=95)
         img_buffer.seek(0)
         
         # Create a file-like object for upload
@@ -215,13 +214,13 @@ def upload_img(decoded_token):
         
         clean_file = FileWrapper(img_buffer)
         
-        current_app.logger.info(f"EXIF stripping successful - job_id: {job_id}, format: {img_format}, mode: {clean_img.mode}")
+        current_app.logger.info(f"EXIF stripping successful - job_id: {job_id}, format: {img_format}, mode: {img.mode}, size: {img.size}")
         ActivityLogger.log_workflow_step(
             user_id=user_id,
             user_role=user_role,
             workflow_type="upload",
             step="exif_stripped",
-            step_data={"job_id": job_id, "original_format": img.format, "mode": img.mode}
+            step_data={"job_id": job_id, "original_format": img.format, "mode": img.mode, "size": img.size}
         )
     except Exception as e:
         ActivityLogger.log_activity(
@@ -232,7 +231,7 @@ def upload_img(decoded_token):
             status="error",
             metadata={"job_id": job_id, "error": str(e)}
         )
-        current_app.logger.warning(f"Failed to strip EXIF data, uploading original file: {e}")
+        current_app.logger.error(f"Failed to strip EXIF data, uploading original file: {e}", exc_info=True)
         # Fall back to original file if EXIF stripping fails
         file.stream.seek(0)
         clean_file = file
