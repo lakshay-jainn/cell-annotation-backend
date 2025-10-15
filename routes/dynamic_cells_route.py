@@ -83,7 +83,7 @@ def calculate_properties_in_chunks(all_polygons, bgr_image, full_hsv,chunk_size=
     logger.info(f"Starting property calculation for {len(all_polygons)} polygons with chunk size {chunk_size}...")
     
     # 1. Convert to HSV ONCE to avoid repeated conversions.
-    full_hsv = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2HSV)
+    # full_hsv = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2HSV)
     
     all_properties = []
     
