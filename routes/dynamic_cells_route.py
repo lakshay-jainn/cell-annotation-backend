@@ -770,8 +770,6 @@ def detect_from_selected_endpoint(decoded_token):
 
         # Clean up prefiltered polygons and full_hsv - no longer needed
         del prefiltered_polygons
-        if num_pixels <= LARGE_IMAGE_PIXEL_THRESHOLD:
-            del full_hsv
         logger.info(f"detect_from_selected_endpoint: Cleaned up HSV image and prefiltered data")
         
         logger.info(f"detect_from_selected_endpoint: STEP 2 complete - Final candidates: {len(candidates)}")
