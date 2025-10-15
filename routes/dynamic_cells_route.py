@@ -723,8 +723,9 @@ def detect_from_selected_endpoint(decoded_token):
 
         # if not selected_properties:
         #     logger.error("detect_from_selected_endpoint: Failed to extract properties from selected cells")
-        #     return jsonify({"error": "Failed to extract properties from selected cells"}), 400\
+        #     return jsonify({"error": "Failed to extract properties from selected cells"}), 400
               # Precompute full HSV image once. It will be reused for candidate filtering.
+
         logger.info(f"detect_from_selected_endpoint: Converting image to HSV (shape: {image.shape})")
         full_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         logger.info(f"detect_from_selected_endpoint: HSV conversion complete")
@@ -769,104 +770,132 @@ def detect_from_selected_endpoint(decoded_token):
         # STEP 2: VECTORIZED HSV filtering for maximum speed
         logger.info(f"detect_from_selected_endpoint: STEP 2 - Vectorized HSV filtering for {len(prefiltered_polygons)} polygons")
         
+        # if prefiltered_polygons:
+        #     # Extract polygon data
+        #     logger.info(f"detect_from_selected_endpoint: Extracting polygon coordinates")
+        #     polygon_indices = [i for i, _, _, _ in prefiltered_polygons]
+        #     polygon_coords = [polygon for _, polygon, _, _ in prefiltered_polygons]
+            
+        #     # Create polygon ID mask - each polygon gets a unique ID
+        #     logger.info(f"detect_from_selected_endpoint: Creating polygon ID mask (image shape: {image.shape[:2]})")
+        #     polygon_id_mask = np.zeros(image.shape[:2], dtype=np.int16)
+        #     polygon_areas = []
+            
+        #     for poly_id, polygon in enumerate(polygon_coords):
+        #         if not polygon or len(polygon) < 3:
+        #             continue
+        #         poly_np = np.array(polygon, dtype=np.int32)
+        #         cv2.fillPoly(polygon_id_mask, [poly_np], poly_id + 1)  # IDs start from 1
+        #         polygon_areas.append(cv2.contourArea(poly_np))
+            
+        #     # Extract HSV values for all pixels
+        #     logger.info(f"detect_from_selected_endpoint: Flattening HSV channels for candidate filtering")
+        #     h_channel = full_hsv[:, :, 0].ravel()
+        #     s_channel = full_hsv[:, :, 1].ravel()
+        #     v_channel = full_hsv[:, :, 2].ravel()
+        #     mask_flat = polygon_id_mask.ravel()
+        #     logger.info(f"detect_from_selected_endpoint: Starting vectorized HSV computation")
+            
+        #     # Vectorized HSV computation for all polygons at once
+        #     candidates = []
+        #     for poly_id in range(1, len(polygon_coords) + 1):
+        #         # Get pixels belonging to this polygon
+        #         poly_pixels = mask_flat == poly_id
+        #         if not np.any(poly_pixels):
+        #             continue
+                
+        #         # Compute mean HSV using vectorized operations
+        #         h_mean = float(np.mean(h_channel[poly_pixels]))
+        #         s_mean = float(np.mean(s_channel[poly_pixels]))
+        #         v_mean = float(np.mean(v_channel[poly_pixels]))
+                
+        #         # HSV filtering
+        #         h_ok = dynamic_params['h_min'] <= h_mean <= dynamic_params['h_max']
+        #         s_ok = dynamic_params['s_min'] <= s_mean <= dynamic_params['s_max']
+        #         v_ok = dynamic_params['v_min'] <= v_mean <= dynamic_params['v_max']
+                
+        #         if not (h_ok and s_ok and v_ok):
+        #             continue
+                
+        #         # Get polygon properties
+        #         polygon = polygon_coords[poly_id - 1]
+        #         poly_np = np.array(polygon, dtype=np.int32)
+                
+        #         # Calculate centroid
+        #         M = cv2.moments(poly_np)
+        #         if M["m00"] != 0:
+        #             cx = int(M["m10"] / M["m00"])
+        #             cy = int(M["m01"] / M["m00"])
+        #         else:
+        #             x, y, w, h = cv2.boundingRect(poly_np)
+        #             cx, cy = x + w//2, y + h//2
+                
+        #         # Get bounding box
+        #         x, y, w, h = cv2.boundingRect(poly_np)
+        #         bbox = [int(x), int(y), int(x + w), int(y + h)]
+                
+        #         # Calculate roundness
+        #         roundness = calculate_roundness(poly_np)
+                
+        #         # Distance filtering - exclude cells too close to selected ones
+        #         too_close = False
+        #         for sx, sy in selected_centroids:
+        #             if (sx - cx)**2 + (sy - cy)**2 < 25:  # 5px radius
+        #                 too_close = True
+        #                 break
+                
+        #         if not too_close:
+        #             candidates.append({
+        #                 'centroid': (cx, cy),
+        #                 'area': polygon_areas[poly_id - 1],
+        #                 'roundness': roundness,
+        #                 'bbox': bbox,
+        #                 'h_mean': h_mean,
+        #                 's_mean': s_mean,
+        #                 'v_mean': v_mean
+        #             })
+            
+        #     # Clean up large arrays used for candidate filtering
+        #     del polygon_id_mask
+        #     del h_channel
+        #     del s_channel
+        #     del v_channel
+        #     del mask_flat
+        #     del polygon_coords
+        #     del polygon_indices
+        #     del polygon_areas
+        #     logger.info(f"detect_from_selected_endpoint: Cleaned up candidate filtering variables")
+        # else:
+        #     candidates = []
+
+
+
+        candidates = []
         if prefiltered_polygons:
-            # Extract polygon data
-            logger.info(f"detect_from_selected_endpoint: Extracting polygon coordinates")
-            polygon_indices = [i for i, _, _, _ in prefiltered_polygons]
-            polygon_coords = [polygon for _, polygon, _, _ in prefiltered_polygons]
+            # Extract just the polygon coordinates
+            prefiltered_coords = [polygon for _, polygon, _, _ in prefiltered_polygons]
             
-            # Create polygon ID mask - each polygon gets a unique ID
-            logger.info(f"detect_from_selected_endpoint: Creating polygon ID mask (image shape: {image.shape[:2]})")
-            polygon_id_mask = np.zeros(image.shape[:2], dtype=np.int16)
-            polygon_areas = []
-            
-            for poly_id, polygon in enumerate(polygon_coords):
-                if not polygon or len(polygon) < 3:
-                    continue
-                poly_np = np.array(polygon, dtype=np.int32)
-                cv2.fillPoly(polygon_id_mask, [poly_np], poly_id + 1)  # IDs start from 1
-                polygon_areas.append(cv2.contourArea(poly_np))
-            
-            # Extract HSV values for all pixels
-            logger.info(f"detect_from_selected_endpoint: Flattening HSV channels for candidate filtering")
-            h_channel = full_hsv[:, :, 0].ravel()
-            s_channel = full_hsv[:, :, 1].ravel()
-            v_channel = full_hsv[:, :, 2].ravel()
-            mask_flat = polygon_id_mask.ravel()
-            logger.info(f"detect_from_selected_endpoint: Starting vectorized HSV computation")
-            
-            # Vectorized HSV computation for all polygons at once
-            candidates = []
-            for poly_id in range(1, len(polygon_coords) + 1):
-                # Get pixels belonging to this polygon
-                poly_pixels = mask_flat == poly_id
-                if not np.any(poly_pixels):
-                    continue
-                
-                # Compute mean HSV using vectorized operations
-                h_mean = float(np.mean(h_channel[poly_pixels]))
-                s_mean = float(np.mean(s_channel[poly_pixels]))
-                v_mean = float(np.mean(v_channel[poly_pixels]))
-                
+            # Calculate all properties (including HSV) in one memory-safe operation
+            candidate_properties = _calculate_polygon_properties_vectorized(prefiltered_coords, full_hsv)
+
+            # Now filter the results in a simple Python loop (very fast, low memory)
+            for props in candidate_properties:
                 # HSV filtering
-                h_ok = dynamic_params['h_min'] <= h_mean <= dynamic_params['h_max']
-                s_ok = dynamic_params['s_min'] <= s_mean <= dynamic_params['s_max']
-                v_ok = dynamic_params['v_min'] <= v_mean <= dynamic_params['v_max']
+                h_ok = dynamic_params['h_min'] <= props['h_mean'] <= dynamic_params['h_max']
+                s_ok = dynamic_params['s_min'] <= props['s_mean'] <= dynamic_params['s_max']
+                v_ok = dynamic_params['v_min'] <= props['v_mean'] <= dynamic_params['v_max']
                 
                 if not (h_ok and s_ok and v_ok):
                     continue
-                
-                # Get polygon properties
-                polygon = polygon_coords[poly_id - 1]
-                poly_np = np.array(polygon, dtype=np.int32)
-                
-                # Calculate centroid
-                M = cv2.moments(poly_np)
-                if M["m00"] != 0:
-                    cx = int(M["m10"] / M["m00"])
-                    cy = int(M["m01"] / M["m00"])
-                else:
-                    x, y, w, h = cv2.boundingRect(poly_np)
-                    cx, cy = x + w//2, y + h//2
-                
-                # Get bounding box
-                x, y, w, h = cv2.boundingRect(poly_np)
-                bbox = [int(x), int(y), int(x + w), int(y + h)]
-                
-                # Calculate roundness
-                roundness = calculate_roundness(poly_np)
-                
+
                 # Distance filtering - exclude cells too close to selected ones
-                too_close = False
-                for sx, sy in selected_centroids:
-                    if (sx - cx)**2 + (sy - cy)**2 < 25:  # 5px radius
-                        too_close = True
-                        break
-                
+                cx, cy = props['centroid']
+                too_close = any((sx - cx)**2 + (sy - cy)**2 < 25 for sx, sy in selected_centroids)
+
                 if not too_close:
-                    candidates.append({
-                        'centroid': (cx, cy),
-                        'area': polygon_areas[poly_id - 1],
-                        'roundness': roundness,
-                        'bbox': bbox,
-                        'h_mean': h_mean,
-                        's_mean': s_mean,
-                        'v_mean': v_mean
-                    })
-            
-            # Clean up large arrays used for candidate filtering
-            del polygon_id_mask
-            del h_channel
-            del s_channel
-            del v_channel
-            del mask_flat
-            del polygon_coords
-            del polygon_indices
-            del polygon_areas
-            logger.info(f"detect_from_selected_endpoint: Cleaned up candidate filtering variables")
-        else:
-            candidates = []
-        
+                    candidates.append(props)
+
+
         # Clean up prefiltered polygons and full_hsv - no longer needed
         del prefiltered_polygons
         del full_hsv
