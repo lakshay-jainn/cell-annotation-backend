@@ -20,119 +20,172 @@ dynamic_cells_route_bp = Blueprint("dynamic_cells", __name__, url_prefix="dynami
 
 # PARAMETERS you can tweak
 MAX_RESULTS = 500
-
+LARGE_IMAGE_PIXEL_THRESHOLD = 7_500_000 
 # ----------------------
 # Helpers
 # ----------------------
 
 from scipy import ndimage
-
-def _process_chunk_vectorized(polygon_chunk, full_hsv):
+def _calculate_properties_iterative(polygons, original_bgr_image):
     """
-    Processes a single 'chunk' of polygons using the fast vectorized method.
-    This function is designed to be memory-efficient for the chunk it is given.
+    Calculates properties by processing each polygon individually on small cropped patches.
+    This is the most memory-efficient method for sparse polygons on large images.
     """
-    if not polygon_chunk:
-        return []
-
-    image_shape = full_hsv.shape[:2]
-    # This mask is temporary and will be destroyed after the function returns, freeing memory.
-    polygon_id_mask = np.zeros(image_shape, dtype=np.int32)
-    
-    geo_properties = []
-    valid_polygon_indices = []
-
-    # The poly_id here is relative to the chunk (1 to chunk_size)
-    for i, polygon in enumerate(polygon_chunk):
-        poly_id = i + 1
-        poly_np = np.array(polygon, dtype=np.int32)
-        cv2.fillPoly(polygon_id_mask, [poly_np], poly_id)
-        
-        # We still need to calculate geometry for each polygon
-        area = cv2.contourArea(poly_np)
-        roundness = calculate_roundness(poly_np)
-        x, y, w, h = cv2.boundingRect(poly_np)
-        M = cv2.moments(poly_np)
-        cx, cy = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])) if M["m00"] != 0 else (x + w//2, y + h//2)
-        
-        geo_properties.append({'area': area, 'roundness': roundness, 'bbox': [x, y, x+w, y+h], 'centroid': (cx, cy)})
-        valid_polygon_indices.append(poly_id)
-        
-    if not valid_polygon_indices:
-        return []
-
-    # Vectorized calculation for the three channels on this chunk's mask
-    mean_h = ndimage.mean(full_hsv[:, :, 0], labels=polygon_id_mask, index=valid_polygon_indices)
-    mean_s = ndimage.mean(full_hsv[:, :, 1], labels=polygon_id_mask, index=valid_polygon_indices)
-    mean_v = ndimage.mean(full_hsv[:, :, 2], labels=polygon_id_mask, index=valid_polygon_indices)
-    mean_hsvs = list(zip(mean_h, mean_s, mean_v))
-
-    # Combine results for this chunk
-    chunk_properties = []
-    for i in range(len(valid_polygon_indices)):
-        props = geo_properties[i]
-        props['h_mean'], props['s_mean'], props['v_mean'] = mean_hsvs[i]
-        chunk_properties.append(props)
-        
-    return chunk_properties
-
-def calculate_properties_in_chunks(all_polygons, bgr_image, full_hsv,chunk_size=500):
-    """
-    Orchestrator that processes all polygons in memory-safe chunks.
-    """
-    logger.info(f"Starting property calculation for {len(all_polygons)} polygons with chunk size {chunk_size}...")
-    
-    # 1. Convert to HSV ONCE to avoid repeated conversions.
-    # full_hsv = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2HSV)
-    
     all_properties = []
     
-    # 2. Loop through the polygons in chunks
-    for i in range(0, len(all_polygons), chunk_size):
-        polygon_chunk = all_polygons[i:i + chunk_size]
-        logger.info(f"Processing chunk {i//chunk_size + 1}/{-(-len(all_polygons)//chunk_size)}...")
-        
-        # 3. Process the current chunk and get its properties
-        chunk_properties = _process_chunk_vectorized(polygon_chunk, full_hsv)
-        
-        # 4. Add the results from this chunk to the main list
-        all_properties.extend(chunk_properties)
-        
-    logger.info("Finished all chunks.")
+    for polygon in polygons:
+        if not polygon or len(polygon) < 3:
+            continue
+
+        try:
+            poly_np = np.array(polygon, dtype=np.int32)
+            
+            # 1. Get the bounding box of the single polygon
+            x, y, w, h = cv2.boundingRect(poly_np)
+            if w == 0 or h == 0:
+                continue
+
+            # 2. Extract a tiny BGR patch from the original image
+            bgr_patch = original_bgr_image[y:y+h, x:x+w]
+
+            # 3. Create a tiny mask ONLY for the patch
+            shifted_poly = poly_np - [x, y]
+            patch_mask = np.zeros((h, w), dtype=np.uint8)
+            cv2.fillPoly(patch_mask, [shifted_poly], 255)
+
+            # 4. Convert ONLY the tiny patch to HSV
+            hsv_patch = cv2.cvtColor(bgr_patch, cv2.COLOR_BGR_HSV)
+
+            # 5. Calculate mean HSV on the patch. cv2.mean is highly optimized.
+            mean_hsv = cv2.mean(hsv_patch, mask=patch_mask)
+
+            # 6. Calculate geometric properties
+            area = cv2.contourArea(poly_np)
+            roundness = calculate_roundness(poly_np)
+            M = cv2.moments(poly_np)
+            cx, cy = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])) if M["m00"] != 0 else (x + w//2, y + h//2)
+            
+            all_properties.append({
+                'area': area,
+                'roundness': roundness,
+                'bbox': [x, y, x+w, y+h],
+                'centroid': (cx, cy),
+                'h_mean': mean_hsv[0],
+                's_mean': mean_hsv[1],
+                'v_mean': mean_hsv[2]
+            })
+        except Exception as e:
+            logger.error(f"Could not process a polygon iteratively: {e}")
+            continue
+            
     return all_properties
 
+# def _process_chunk_vectorized(polygon_chunk, full_hsv):
+#     """
+#     Processes a single 'chunk' of polygons using the fast vectorized method.
+#     This function is designed to be memory-efficient for the chunk it is given.
+#     """
+#     if not polygon_chunk:
+#         return []
 
-def get_dynamic_chunk_size(image_shape, num_polygons, safety_factor=0.5):
-    """
-    Calculates a safe chunk size based on available memory and image dimensions.
-    """
-    try:
-        available_ram = psutil.virtual_memory().available  # Bytes
+#     image_shape = full_hsv.shape[:2]
+#     # This mask is temporary and will be destroyed after the function returns, freeing memory.
+#     polygon_id_mask = np.zeros(image_shape, dtype=np.int32)
+    
+#     geo_properties = []
+#     valid_polygon_indices = []
+
+#     # The poly_id here is relative to the chunk (1 to chunk_size)
+#     for i, polygon in enumerate(polygon_chunk):
+#         poly_id = i + 1
+#         poly_np = np.array(polygon, dtype=np.int32)
+#         cv2.fillPoly(polygon_id_mask, [poly_np], poly_id)
         
-        # Estimate memory for ONE full-size int32 mask (the main memory user per chunk)
-        # image_shape is (height, width)
-        mask_mem_bytes = image_shape[0] * image_shape[1] * 4  # 4 bytes for int32
+#         # We still need to calculate geometry for each polygon
+#         area = cv2.contourArea(poly_np)
+#         roundness = calculate_roundness(poly_np)
+#         x, y, w, h = cv2.boundingRect(poly_np)
+#         M = cv2.moments(poly_np)
+#         cx, cy = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])) if M["m00"] != 0 else (x + w//2, y + h//2)
         
-        # The target memory is a fraction of the *available* RAM to be safe
-        target_memory_usage = available_ram * safety_factor
+#         geo_properties.append({'area': area, 'roundness': roundness, 'bbox': [x, y, x+w, y+h], 'centroid': (cx, cy)})
+#         valid_polygon_indices.append(poly_id)
         
-        # If a single mask already exceeds our target, we must use a very small chunk size
-        if mask_mem_bytes > target_memory_usage:
-            logger.warning("Image is very large; a single mask is memory-intensive. Using a minimal chunk size.")
-            return 2 # Fallback to a small, safe number
+#     if not valid_polygon_indices:
+#         return []
+
+#     # Vectorized calculation for the three channels on this chunk's mask
+#     mean_h = ndimage.mean(full_hsv[:, :, 0], labels=polygon_id_mask, index=valid_polygon_indices)
+#     mean_s = ndimage.mean(full_hsv[:, :, 1], labels=polygon_id_mask, index=valid_polygon_indices)
+#     mean_v = ndimage.mean(full_hsv[:, :, 2], labels=polygon_id_mask, index=valid_polygon_indices)
+#     mean_hsvs = list(zip(mean_h, mean_s, mean_v))
+
+#     # Combine results for this chunk
+#     chunk_properties = []
+#     for i in range(len(valid_polygon_indices)):
+#         props = geo_properties[i]
+#         props['h_mean'], props['s_mean'], props['v_mean'] = mean_hsvs[i]
+#         chunk_properties.append(props)
+        
+#     return chunk_properties
+
+# def calculate_properties_in_chunks(all_polygons, bgr_image, full_hsv,chunk_size=500):
+#     """
+#     Orchestrator that processes all polygons in memory-safe chunks.
+#     """
+#     logger.info(f"Starting property calculation for {len(all_polygons)} polygons with chunk size {chunk_size}...")
+    
+#     # 1. Convert to HSV ONCE to avoid repeated conversions.
+#     # full_hsv = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2HSV)
+    
+#     all_properties = []
+    
+#     # 2. Loop through the polygons in chunks
+#     for i in range(0, len(all_polygons), chunk_size):
+#         polygon_chunk = all_polygons[i:i + chunk_size]
+#         logger.info(f"Processing chunk {i//chunk_size + 1}/{-(-len(all_polygons)//chunk_size)}...")
+        
+#         # 3. Process the current chunk and get its properties
+#         chunk_properties = _process_chunk_vectorized(polygon_chunk, full_hsv)
+        
+#         # 4. Add the results from this chunk to the main list
+#         all_properties.extend(chunk_properties)
+        
+#     logger.info("Finished all chunks.")
+#     return all_properties
+
+
+# def get_dynamic_chunk_size(image_shape, num_polygons, safety_factor=0.5):
+#     """
+#     Calculates a safe chunk size based on available memory and image dimensions.
+#     """
+#     try:
+#         available_ram = psutil.virtual_memory().available  # Bytes
+        
+#         # Estimate memory for ONE full-size int32 mask (the main memory user per chunk)
+#         # image_shape is (height, width)
+#         mask_mem_bytes = image_shape[0] * image_shape[1] * 4  # 4 bytes for int32
+        
+#         # The target memory is a fraction of the *available* RAM to be safe
+#         target_memory_usage = available_ram * safety_factor
+        
+#         # If a single mask already exceeds our target, we must use a very small chunk size
+#         if mask_mem_bytes > target_memory_usage:
+#             logger.warning("Image is very large; a single mask is memory-intensive. Using a minimal chunk size.")
+#             return 2 # Fallback to a small, safe number
             
-        # For simplicity, we'll use a heuristic. A chunk size of 500-1000 is a good balance.
-        # We can scale it down if memory is very low.
-        if available_ram < 2 * 1024**3: # Less than 2GB available
-             return 250
-        elif available_ram < 4 * 1024**3: # Less than 4GB available
-             return 500
-        else: # Plenty of memory
-             return 1000
+#         # For simplicity, we'll use a heuristic. A chunk size of 500-1000 is a good balance.
+#         # We can scale it down if memory is very low.
+#         if available_ram < 2 * 1024**3: # Less than 2GB available
+#              return 250
+#         elif available_ram < 4 * 1024**3: # Less than 4GB available
+#              return 500
+#         else: # Plenty of memory
+#              return 1000
 
-    except Exception as e:
-        logger.error(f"Could not determine dynamic chunk size: {e}. Falling back to default.")
-        return 500 # Default fallback
+#     except Exception as e:
+#         logger.error(f"Could not determine dynamic chunk size: {e}. Falling back to default.")
+#         return 500 # Default fallback
     
 def _calculate_polygon_properties_vectorized(polygons, full_hsv):
     """
@@ -832,11 +885,20 @@ def detect_from_selected_endpoint(decoded_token):
               # Precompute full HSV image once. It will be reused for candidate filtering.
 
         logger.info(f"detect_from_selected_endpoint: Converting image to HSV (shape: {image.shape})")
-        full_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        
         logger.info(f"detect_from_selected_endpoint: HSV conversion complete")
         # selected_properties = _calculate_polygon_properties_vectorized(selected_polygons, full_hsv)
-        selected_chunk_size = get_dynamic_chunk_size(image.shape[:2], len(selected_polygons))
-        selected_properties = calculate_properties_in_chunks(selected_polygons, image,full_hsv, chunk_size=selected_chunk_size)
+        # selected_chunk_size = get_dynamic_chunk_size(image.shape[:2], len(selected_polygons))
+        
+        height, width, channels = image.shape
+        num_pixels = height * width
+        if num_pixels > LARGE_IMAGE_PIXEL_THRESHOLD:
+                logger.warning(f"Image is large ({num_pixels} pixels), using memory-safe iterative method.")
+                # Call the safe, one-by-one method
+                selected_properties = _calculate_properties_iterative(selected_polygons, image)
+        else:
+            full_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+            selected_properties = _calculate_polygon_properties_vectorized(selected_polygons,full_hsv)
 
         logger.info(f"detect_from_selected_endpoint: Successfully extracted properties from {len(selected_properties)} selected cells")
         
@@ -984,13 +1046,20 @@ def detect_from_selected_endpoint(decoded_token):
             prefiltered_coords = [polygon for _, polygon, _, _ in prefiltered_polygons]
             
             # Calculate all properties (including HSV) in one memory-safe operation
-            # candidate_properties = _calculate_polygon_properties_vectorized(prefiltered_coords, full_hsv)
+            if num_pixels > LARGE_IMAGE_PIXEL_THRESHOLD:
+                logger.warning(f"Image is large ({num_pixels} pixels), using memory-safe iterative method.")
+                # Call the safe, one-by-one method
+                candidate_properties = _calculate_properties_iterative(prefiltered_coords, image)
+            else:
+                candidate_properties = _calculate_polygon_properties_vectorized(prefiltered_coords,full_hsv)
+
+            
             
             # Get a smart chunk size based on your available RAM and image size
-            candidate_chunk_size = get_dynamic_chunk_size(image.shape[:2], len(prefiltered_coords))
+            # candidate_chunk_size = get_dynamic_chunk_size(image.shape[:2], len(prefiltered_coords))
 
-            # Calculate all candidate properties using the orchestrator
-            candidate_properties = calculate_properties_in_chunks(prefiltered_coords, image, full_hsv,chunk_size=candidate_chunk_size)
+            # # Calculate all candidate properties using the orchestrator
+            # candidate_properties = calculate_properties_in_chunks(prefiltered_coords, image, full_hsv,chunk_size=candidate_chunk_size)
 
             # Now filter the results in a simple Python loop (very fast, low memory)
             for props in candidate_properties:
