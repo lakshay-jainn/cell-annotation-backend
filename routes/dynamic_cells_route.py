@@ -593,10 +593,10 @@ def detect_from_selected_endpoint(decoded_token):
             
             # Vectorized HSV computation for all selected polygons at once
             logger.info(f"detect_from_selected_endpoint: Flattening HSV channels for vectorized processing")
-            h_channel = full_hsv[:, :, 0].flatten()
-            s_channel = full_hsv[:, :, 1].flatten()
-            v_channel = full_hsv[:, :, 2].flatten()
-            mask_flat = selected_id_mask.flatten()
+            h_channel = full_hsv[:, :, 0].ravel()
+            s_channel = full_hsv[:, :, 1].ravel()
+            v_channel = full_hsv[:, :, 2].ravel()
+            mask_flat = selected_id_mask.ravel()
             logger.info(f"detect_from_selected_endpoint: Channels flattened, computing properties")
             
             selected_properties = []
@@ -697,10 +697,10 @@ def detect_from_selected_endpoint(decoded_token):
             
             # Extract HSV values for all pixels
             logger.info(f"detect_from_selected_endpoint: Flattening HSV channels for candidate filtering")
-            h_channel = full_hsv[:, :, 0].flatten()
-            s_channel = full_hsv[:, :, 1].flatten()
-            v_channel = full_hsv[:, :, 2].flatten()
-            mask_flat = polygon_id_mask.flatten()
+            h_channel = full_hsv[:, :, 0].ravel()
+            s_channel = full_hsv[:, :, 1].ravel()
+            v_channel = full_hsv[:, :, 2].ravel()
+            mask_flat = polygon_id_mask.ravel()
             logger.info(f"detect_from_selected_endpoint: Starting vectorized HSV computation")
             
             # Vectorized HSV computation for all polygons at once
