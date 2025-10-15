@@ -552,6 +552,10 @@ def detect_from_selected_endpoint(decoded_token):
 
         logger.info(f"detect_from_selected_endpoint: Found {len(selected_indices)} selected examples")
         
+        # Clean up annotations dataframe - no longer needed
+        del annotations_df
+        del annotations_csv
+        
         if not selected_indices:
             ActivityLogger.log_activity(
                 user_id=user_id,
@@ -564,6 +568,9 @@ def detect_from_selected_endpoint(decoded_token):
             return jsonify({"error": "No selected examples could be matched to cell predictions"}), 400
 
         logger.info(f"detect_from_selected_endpoint: Matched {len(selected_polygons)} selected cell polygons")
+        
+        # Clean up full_df - no longer needed after matching
+        del full_df
 
         # VECTORIZED PROPERTY EXTRACTION FOR SELECTED CELLS
         logger.info(f"detect_from_selected_endpoint: Extracting properties from selected cells")
@@ -636,6 +643,16 @@ def detect_from_selected_endpoint(decoded_token):
                     'bbox': cv2.boundingRect(poly_np),
                     'centroid': (cx, cy)
                 })
+            
+            # Clean up selected cell processing variables
+            del selected_id_mask
+            del h_channel
+            del s_channel
+            del v_channel
+            del mask_flat
+            del selected_areas
+            del selected_roundness
+            logger.info(f"detect_from_selected_endpoint: Cleaned up selected cell processing variables")
         else:
             selected_properties = []
 
@@ -644,6 +661,9 @@ def detect_from_selected_endpoint(decoded_token):
             return jsonify({"error": "Failed to extract properties from selected cells"}), 400
 
         logger.info(f"detect_from_selected_endpoint: Successfully extracted properties from {len(selected_properties)} selected cells")
+        
+        # Clean up selected polygons - no longer needed
+        del selected_polygons
 
         # Calculate dynamic detection parameters
         logger.info(f"detect_from_selected_endpoint: Calculating dynamic parameters")
@@ -673,6 +693,9 @@ def detect_from_selected_endpoint(decoded_token):
                 prefiltered_polygons.append((i, polygon, area, roundness))
 
         logger.info(f"detect_from_selected_endpoint: STEP 1 complete - Prefiltered to {len(prefiltered_polygons)} polygons")
+        
+        # Clean up polygons_list - no longer needed after pre-filtering
+        del polygons_list
 
         # STEP 2: VECTORIZED HSV filtering for maximum speed
         logger.info(f"detect_from_selected_endpoint: STEP 2 - Vectorized HSV filtering for {len(prefiltered_polygons)} polygons")
@@ -761,8 +784,24 @@ def detect_from_selected_endpoint(decoded_token):
                         's_mean': s_mean,
                         'v_mean': v_mean
                     })
+            
+            # Clean up large arrays used for candidate filtering
+            del polygon_id_mask
+            del h_channel
+            del s_channel
+            del v_channel
+            del mask_flat
+            del polygon_coords
+            del polygon_indices
+            del polygon_areas
+            logger.info(f"detect_from_selected_endpoint: Cleaned up candidate filtering variables")
         else:
             candidates = []
+        
+        # Clean up prefiltered polygons and full_hsv - no longer needed
+        del prefiltered_polygons
+        del full_hsv
+        logger.info(f"detect_from_selected_endpoint: Cleaned up HSV image and prefiltered data")
         
         logger.info(f"detect_from_selected_endpoint: STEP 2 complete - Final candidates: {len(candidates)}")
 
@@ -786,6 +825,10 @@ def detect_from_selected_endpoint(decoded_token):
             } for i, props in enumerate(candidates[:target])
         ]
         logger.info(f"detect_from_selected_endpoint: Created suggestions list with {len(suggestions_list)} items")
+        
+        # Clean up candidates list - no longer needed
+        del candidates
+        del selected_centroids
 
         selection_debug = {
             'method': 'csv_filter',
@@ -802,6 +845,7 @@ def detect_from_selected_endpoint(decoded_token):
         if suggestions_list:
             suggestions_df = pd.DataFrame(suggestions_list)
             csv_buf = suggestions_df.to_csv(index=False)
+            del suggestions_df  # Clean up dataframe
         else:
             csv_buf = "label,x,y,score,area,roundness,bbox\n"
 
@@ -840,6 +884,13 @@ def detect_from_selected_endpoint(decoded_token):
         )
 
         logger.info(f"detect_from_selected_endpoint: Request completed successfully")
+        
+        # Final cleanup before returning
+        del image
+        del selected_properties
+        del selected_indices
+        logger.info(f"detect_from_selected_endpoint: Final memory cleanup complete")
+        
         return jsonify(response_payload)
 
     except Exception as e:
