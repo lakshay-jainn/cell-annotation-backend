@@ -26,17 +26,21 @@ MAX_RESULTS = 500
 # ----------------------
 
 def parse_annotations_csv(text_or_bytes):
+    logger.info(f"parse_annotations_csv: Starting, input type: {type(text_or_bytes)}")
     if isinstance(text_or_bytes, (bytes, bytearray)):
         text = text_or_bytes.decode("utf-8")
     else:
         text = str(text_or_bytes)
     df = pd.read_csv(io.StringIO(text))
+    logger.info(f"parse_annotations_csv: Completed, rows: {len(df)}, columns: {list(df.columns)}")
     return df
 
 def load_image_from_request():
     """Unified image loading from either file upload or S3 — memory-safe via temporary files."""
+    logger.info("load_image_from_request: Starting image load")
     if 'image' in request.files:
         # Load from uploaded file using a temporary file instead of .read()
+        logger.info("load_image_from_request: Loading from uploaded file")
         img_file = request.files['image']
         with tempfile.NamedTemporaryFile(delete=False, suffix=".img") as tmp:
             img_file.save(tmp.name)
@@ -44,6 +48,7 @@ def load_image_from_request():
 
         # Decode directly from disk (low memory)
         image = cv2.imread(tmp_path, cv2.IMREAD_COLOR)
+        logger.info(f"load_image_from_request: Image loaded from file, shape: {image.shape if image is not None else 'None'}")
 
         # Clean up temp file
         try:
@@ -55,7 +60,9 @@ def load_image_from_request():
 
     elif 's3_object_key' in request.form:
         # Load from S3 to temporary file
+        logger.info("load_image_from_request: Loading from S3")
         s3_object_key = request.form['s3_object_key']
+        logger.info(f"load_image_from_request: S3 key: {s3_object_key}")
         from utilities.aws_utility import s3_client, S3_BUCKET_NAME
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".img") as tmp:
@@ -69,6 +76,8 @@ def load_image_from_request():
         # Convert RGB → BGR for OpenCV
         if len(image.shape) == 3 and image.shape[2] == 3:
             image = image[:, :, ::-1]
+        
+        logger.info(f"load_image_from_request: Image loaded from S3, shape: {image.shape if image is not None else 'None'}")
 
         # Clean up temp file
         try:
@@ -78,6 +87,7 @@ def load_image_from_request():
 
         return image
 
+    logger.warning("load_image_from_request: No image source found")
     return None
 
 def calculate_roundness(contour):
@@ -170,6 +180,7 @@ def calculate_dynamic_parameters(selected_properties, strictness=5):
     Simplified parameter calculation with linear strictness correlation.
     strictness: 1-10, where 1=most lenient, 10=most strict
     """
+    logger.info(f"calculate_dynamic_parameters: Starting with {len(selected_properties) if selected_properties else 0} properties, strictness={strictness}")
     if not selected_properties:
         return {
             'h_min': 62, 'h_max': 133,
@@ -222,13 +233,15 @@ def calculate_dynamic_parameters(selected_properties, strictness=5):
     roundness_buffer = -20 + (strictness - 1) * 2  # -20 (lenient) to 0 (strict)
     min_roundness = max(10, int(min_roundness + roundness_buffer))
 
-    return {
+    params = {
         'h_min': h_min, 'h_max': h_max,
         's_min': s_min, 's_max': s_max,
         'v_min': v_min, 'v_max': v_max,
         'min_area': min_area, 'max_area': max_area,
         'min_roundness': min_roundness
     }
+    logger.info(f"calculate_dynamic_parameters: Completed, params={params}")
+    return params
 
 def detect_lymphocytes_with_dynamic_params(image, dynamic_params):
     """
@@ -404,12 +417,14 @@ def detect_from_selected_endpoint(decoded_token):
 
     try:
         # Load image using unified function
+        logger.info("detect_from_selected_endpoint: Loading image")
         image = load_image_from_request()
         if image is None:
             return jsonify({"error": "Missing 'image' file or 's3_object_key' parameter"}), 400
 
         # Get job_id to load cell predictions CSV
         job_id = request.form.get('jobId')
+        logger.info(f"detect_from_selected_endpoint: Job ID: {job_id}")
         if not job_id:
             ActivityLogger.log_activity(
                 user_id=user_id,
@@ -422,6 +437,7 @@ def detect_from_selected_endpoint(decoded_token):
             return jsonify({"error": "Missing jobId parameter"}), 400
 
         # Load full cell predictions CSV from database/S3
+        logger.info(f"detect_from_selected_endpoint: Querying database for job_id: {job_id}")
         sample = Sample.query.filter_by(job_id=job_id).first()
         if not sample:
             ActivityLogger.log_activity(
@@ -435,11 +451,12 @@ def detect_from_selected_endpoint(decoded_token):
             return jsonify({"error": f"Sample with job_id {job_id} not found"}), 404
 
         # Load the full CSV with polygons
+        logger.info(f"detect_from_selected_endpoint: Loading CSV from S3")
         try:
             import boto3
             from utilities.aws_utility import s3_client, S3_BUCKET_NAME
 
-            logger.info(f"Loading CSV from S3 key: {sample.s3_inference_key}")
+            logger.info(f"detect_from_selected_endpoint: S3 key: {sample.s3_inference_key}")
             s3_response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=sample.s3_inference_key)
             csv_data = s3_response['Body'].read().decode('utf-8')
             logger.info(f"CSV data length: {len(csv_data)}")
@@ -448,6 +465,7 @@ def detect_from_selected_endpoint(decoded_token):
             logger.info(f"CSV shape: {full_df.shape}")
 
             # Parse polygons and create polygons list
+            logger.info(f"detect_from_selected_endpoint: Parsing polygons from CSV")
             polygons_list = []
             for idx, row in full_df.iterrows():
                 poly_x = []
@@ -463,7 +481,7 @@ def detect_from_selected_endpoint(decoded_token):
                 else:
                     polygons_list.append([])
 
-            logger.info(f"Parsed {len(polygons_list)} polygons")
+            logger.info(f"detect_from_selected_endpoint: Parsed {len(polygons_list)} polygons successfully")
 
         except Exception as csv_error:
             logger.info(f"CSV loading error: {csv_error}")
@@ -481,6 +499,7 @@ def detect_from_selected_endpoint(decoded_token):
 
         # Get selected examples from annotations CSV
         strictness = int(request.form.get('strictness', 5))  # Default to 5 (medium strictness)
+        logger.info(f"detect_from_selected_endpoint: Strictness level: {strictness}")
         if 'annotations' not in request.form and 'annotations' not in request.files:
             ActivityLogger.log_activity(
                 user_id=user_id,
@@ -497,11 +516,13 @@ def detect_from_selected_endpoint(decoded_token):
         else:
             annotations_csv = request.files['annotations'].read().decode('utf-8')
 
+        logger.info(f"detect_from_selected_endpoint: Parsing annotations CSV")
         annotations_df = parse_annotations_csv(annotations_csv)
         if not {'x', 'y', 'selected'}.issubset(annotations_df.columns):
             return jsonify({"error": "annotations CSV must contain 'x', 'y', and 'selected' columns"}), 400
 
         # Find selected cells by matching centroids
+        logger.info(f"detect_from_selected_endpoint: Matching selected cells to polygons")
         selected_indices = []
         selected_polygons = []
         for idx, row in annotations_df.iterrows():
@@ -528,6 +549,8 @@ def detect_from_selected_endpoint(decoded_token):
                     if best_i < len(polygons_list):
                         selected_polygons.append(polygons_list[best_i])
 
+        logger.info(f"detect_from_selected_endpoint: Found {len(selected_indices)} selected examples")
+        
         if not selected_indices:
             ActivityLogger.log_activity(
                 user_id=user_id,
@@ -539,14 +562,18 @@ def detect_from_selected_endpoint(decoded_token):
             )
             return jsonify({"error": "No selected examples could be matched to cell predictions"}), 400
 
-        logger.info(f"Found {len(selected_polygons)} selected cell polygons")
+        logger.info(f"detect_from_selected_endpoint: Matched {len(selected_polygons)} selected cell polygons")
 
         # VECTORIZED PROPERTY EXTRACTION FOR SELECTED CELLS
+        logger.info(f"detect_from_selected_endpoint: Extracting properties from selected cells")
         if selected_polygons:
             # Precompute full HSV for speed
+            logger.info(f"detect_from_selected_endpoint: Converting image to HSV (shape: {image.shape})")
             full_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+            logger.info(f"detect_from_selected_endpoint: HSV conversion complete")
             
             # Create polygon ID mask for selected polygons - each gets a unique ID
+            logger.info(f"detect_from_selected_endpoint: Creating polygon masks")
             selected_id_mask = np.zeros(image.shape[:2], dtype=np.int32)
             selected_areas = []
             selected_roundness = []
@@ -564,10 +591,12 @@ def detect_from_selected_endpoint(decoded_token):
                 selected_roundness.append(roundness)
             
             # Vectorized HSV computation for all selected polygons at once
+            logger.info(f"detect_from_selected_endpoint: Flattening HSV channels for vectorized processing")
             h_channel = full_hsv[:, :, 0].flatten()
             s_channel = full_hsv[:, :, 1].flatten()
             v_channel = full_hsv[:, :, 2].flatten()
             mask_flat = selected_id_mask.flatten()
+            logger.info(f"detect_from_selected_endpoint: Channels flattened, computing properties")
             
             selected_properties = []
             for poly_id in range(1, len(selected_polygons) + 1):
@@ -610,21 +639,24 @@ def detect_from_selected_endpoint(decoded_token):
             selected_properties = []
 
         if not selected_properties:
+            logger.error("detect_from_selected_endpoint: Failed to extract properties from selected cells")
             return jsonify({"error": "Failed to extract properties from selected cells"}), 400
 
-        logger.info(f"Extracted properties from {len(selected_properties)} selected cells")
+        logger.info(f"detect_from_selected_endpoint: Successfully extracted properties from {len(selected_properties)} selected cells")
 
         # Calculate dynamic detection parameters
+        logger.info(f"detect_from_selected_endpoint: Calculating dynamic parameters")
         dynamic_params = calculate_dynamic_parameters(selected_properties, strictness)
-        logger.info(f"Calculated dynamic parameters: H({dynamic_params['h_min']}-{dynamic_params['h_max']}) S({dynamic_params['s_min']}-{dynamic_params['s_max']}) V({dynamic_params['v_min']}-{dynamic_params['v_max']}) Area({dynamic_params['min_area']}-{dynamic_params['max_area']}) Roundness({dynamic_params['min_roundness']})")
+        logger.info(f"detect_from_selected_endpoint: Dynamic params - H({dynamic_params['h_min']}-{dynamic_params['h_max']}) S({dynamic_params['s_min']}-{dynamic_params['s_max']}) V({dynamic_params['v_min']}-{dynamic_params['v_max']}) Area({dynamic_params['min_area']}-{dynamic_params['max_area']}) Roundness({dynamic_params['min_roundness']})")
 
         # Use the same full_hsv for candidates filtering
 
         # Use CSV polygons as candidates - OPTIMIZED VERSION
+        logger.info(f"detect_from_selected_endpoint: Preparing selected centroids for filtering")
         selected_centroids = [tuple(map(float, p['centroid'])) for p in selected_properties if 'centroid' in p]
 
         # STEP 1: Fast pre-filtering by area and roundness only (no HSV yet)
-        logger.info(f"Pre-filtering {len(polygons_list)} polygons by area/roundness...")
+        logger.info(f"detect_from_selected_endpoint: STEP 1 - Pre-filtering {len(polygons_list)} polygons by area/roundness")
         prefiltered_polygons = []
         for i, polygon in enumerate(polygons_list):
             if i in selected_indices or not polygon or len(polygon) < 3:
@@ -639,17 +671,19 @@ def detect_from_selected_endpoint(decoded_token):
             if roundness >= dynamic_params['min_roundness']:
                 prefiltered_polygons.append((i, polygon, area, roundness))
 
-        logger.info(f"Prefiltered to {len(prefiltered_polygons)} polygons")
+        logger.info(f"detect_from_selected_endpoint: STEP 1 complete - Prefiltered to {len(prefiltered_polygons)} polygons")
 
         # STEP 2: VECTORIZED HSV filtering for maximum speed
-        logger.info(f"Vectorized HSV filtering for {len(prefiltered_polygons)} polygons...")
+        logger.info(f"detect_from_selected_endpoint: STEP 2 - Vectorized HSV filtering for {len(prefiltered_polygons)} polygons")
         
         if prefiltered_polygons:
             # Extract polygon data
+            logger.info(f"detect_from_selected_endpoint: Extracting polygon coordinates")
             polygon_indices = [i for i, _, _, _ in prefiltered_polygons]
             polygon_coords = [polygon for _, polygon, _, _ in prefiltered_polygons]
             
             # Create polygon ID mask - each polygon gets a unique ID
+            logger.info(f"detect_from_selected_endpoint: Creating polygon ID mask (image shape: {image.shape[:2]})")
             polygon_id_mask = np.zeros(image.shape[:2], dtype=np.int32)
             polygon_areas = []
             
@@ -661,10 +695,12 @@ def detect_from_selected_endpoint(decoded_token):
                 polygon_areas.append(cv2.contourArea(poly_np))
             
             # Extract HSV values for all pixels
+            logger.info(f"detect_from_selected_endpoint: Flattening HSV channels for candidate filtering")
             h_channel = full_hsv[:, :, 0].flatten()
             s_channel = full_hsv[:, :, 1].flatten()
             v_channel = full_hsv[:, :, 2].flatten()
             mask_flat = polygon_id_mask.flatten()
+            logger.info(f"detect_from_selected_endpoint: Starting vectorized HSV computation")
             
             # Vectorized HSV computation for all polygons at once
             candidates = []
@@ -727,13 +763,16 @@ def detect_from_selected_endpoint(decoded_token):
         else:
             candidates = []
         
-        logger.info(f"Final candidates after vectorized HSV filtering: {len(candidates)}")
+        logger.info(f"detect_from_selected_endpoint: STEP 2 complete - Final candidates: {len(candidates)}")
 
         # Calculate target based on strictness: more lenient = more cells
+        logger.info(f"detect_from_selected_endpoint: Calculating target suggestion count")
         base_target = min(200, len(selected_properties) * 15)
         target = min(MAX_RESULTS, int(base_target * (11 - strictness) / 5.0))  # Linear scaling
         target = max(target, 20)  # Minimum 20 cells
+        logger.info(f"detect_from_selected_endpoint: Target suggestions: {target}")
 
+        logger.info(f"detect_from_selected_endpoint: Creating suggestions list")
         suggestions_list = [
             {
                 'label': f'csv_cell_{i}',
@@ -745,7 +784,7 @@ def detect_from_selected_endpoint(decoded_token):
                 'bbox': props['bbox']
             } for i, props in enumerate(candidates[:target])
         ]
-        logger.info(f"After selection, suggestions_list has {len(suggestions_list)} items")
+        logger.info(f"detect_from_selected_endpoint: Created suggestions list with {len(suggestions_list)} items")
 
         selection_debug = {
             'method': 'csv_filter',
@@ -755,9 +794,10 @@ def detect_from_selected_endpoint(decoded_token):
             'exclusion_radius': 5  # Fixed 5px exclusion radius
         }
 
-        logger.info(f"Final suggestions list: {len(suggestions_list)} cells")
+        logger.info(f"detect_from_selected_endpoint: Final suggestions list: {len(suggestions_list)} cells")
 
         # Create CSV response
+        logger.info(f"detect_from_selected_endpoint: Creating CSV response")
         if suggestions_list:
             suggestions_df = pd.DataFrame(suggestions_list)
             csv_buf = suggestions_df.to_csv(index=False)
@@ -765,6 +805,7 @@ def detect_from_selected_endpoint(decoded_token):
             csv_buf = "label,x,y,score,area,roundness,bbox\n"
 
         # Prepare response
+        logger.info(f"detect_from_selected_endpoint: Preparing response payload")
         response_payload = {
             "csv": csv_buf,
             "num_candidates": len(candidates),
@@ -797,6 +838,7 @@ def detect_from_selected_endpoint(decoded_token):
             }
         )
 
+        logger.info(f"detect_from_selected_endpoint: Request completed successfully")
         return jsonify(response_payload)
 
     except Exception as e:
