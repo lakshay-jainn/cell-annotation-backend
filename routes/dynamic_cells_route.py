@@ -119,7 +119,7 @@ def get_dynamic_chunk_size(image_shape, num_polygons, safety_factor=0.5):
         # If a single mask already exceeds our target, we must use a very small chunk size
         if mask_mem_bytes > target_memory_usage:
             logger.warning("Image is very large; a single mask is memory-intensive. Using a minimal chunk size.")
-            return 100 # Fallback to a small, safe number
+            return 10 # Fallback to a small, safe number
             
         # For simplicity, we'll use a heuristic. A chunk size of 500-1000 is a good balance.
         # We can scale it down if memory is very low.
@@ -991,7 +991,7 @@ def detect_from_selected_endpoint(decoded_token):
 
             # Calculate all candidate properties using the orchestrator
             candidate_properties = calculate_properties_in_chunks(prefiltered_coords, image, chunk_size=candidate_chunk_size)
-            
+
             # Now filter the results in a simple Python loop (very fast, low memory)
             for props in candidate_properties:
                 # HSV filtering
