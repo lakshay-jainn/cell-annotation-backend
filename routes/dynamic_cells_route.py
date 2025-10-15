@@ -24,6 +24,70 @@ MAX_RESULTS = 500
 # ----------------------
 # Helpers
 # ----------------------
+# AFTER: Low memory usage and much faster
+from scipy import ndimage
+
+def _calculate_polygon_properties_vectorized(polygons, full_hsv):
+    """
+    Calculates area, roundness, and mean HSV for a list of polygons using vectorized operations.
+    
+    Returns a list of property dictionaries.
+    """
+    if not polygons:
+        return []
+
+    image_shape = full_hsv.shape[:2]
+    num_polygons = len(polygons)
+
+    # Create a single mask where each polygon is filled with a unique ID (1, 2, 3...)
+    # Use np.int32 for the mask to support many polygons.
+    polygon_id_mask = np.zeros(image_shape, dtype=np.int32)
+    
+    # Store geometric properties calculated in the same loop to be efficient
+    geo_properties = []
+    valid_polygon_indices = []
+
+    for i, polygon in enumerate(polygons):
+        poly_id = i + 1
+        if not polygon or len(polygon) < 3:
+            geo_properties.append({'area': 0, 'roundness': 0, 'bbox': [0,0,0,0], 'centroid': (0,0)})
+            continue
+
+        poly_np = np.array(polygon, dtype=np.int32)
+        cv2.fillPoly(polygon_id_mask, [poly_np], poly_id)
+        
+        area = cv2.contourArea(poly_np)
+        roundness = calculate_roundness(poly_np)
+        x, y, w, h = cv2.boundingRect(poly_np)
+        
+        M = cv2.moments(poly_np)
+        if M["m00"] != 0:
+            cx = int(M["m10"] / M["m00"])
+            cy = int(M["m01"] / M["m00"])
+        else:
+            cx, cy = x + w//2, y + h//2
+
+        geo_properties.append({'area': area, 'roundness': roundness, 'bbox': [x, y, x+w, y+h], 'centroid': (cx, cy)})
+        valid_polygon_indices.append(poly_id)
+        
+    if not valid_polygon_indices:
+        return []
+
+    # Use scipy.ndimage.mean to calculate the mean HSV for ALL polygons in ONE pass
+    # This is extremely fast and memory-efficient.
+    # The result is a list where each item is the mean for the corresponding polygon ID.
+    # e.g., mean_hsvs[0] is for poly_id 1, mean_hsvs[1] is for poly_id 2, etc.
+    logger.info(f"Calculating mean HSV for {len(valid_polygon_indices)} polygons vectorially...")
+    mean_hsvs = ndimage.mean(full_hsv, labels=polygon_id_mask, index=valid_polygon_indices)
+    
+    # Combine geometric and color properties
+    all_properties = []
+    for i, poly_id in enumerate(valid_polygon_indices):
+        props = geo_properties[poly_id - 1]
+        props['h_mean'], props['s_mean'], props['v_mean'] = mean_hsvs[i]
+        all_properties.append(props)
+        
+    return all_properties
 
 def parse_annotations_csv(text_or_bytes):
     logger.info(f"parse_annotations_csv: Starting, input type: {type(text_or_bytes)}")
@@ -574,92 +638,97 @@ def detect_from_selected_endpoint(decoded_token):
 
         # VECTORIZED PROPERTY EXTRACTION FOR SELECTED CELLS
         logger.info(f"detect_from_selected_endpoint: Extracting properties from selected cells")
-        if selected_polygons:
-            # Precompute full HSV for speed
-            logger.info(f"detect_from_selected_endpoint: Converting image to HSV (shape: {image.shape})")
-            full_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-            logger.info(f"detect_from_selected_endpoint: HSV conversion complete")
-            
-            # Create polygon ID mask for selected polygons - each gets a unique ID
-            logger.info(f"detect_from_selected_endpoint: Creating polygon masks")
-            selected_id_mask = np.zeros(image.shape[:2], dtype=np.int32)
-            selected_areas = []
-            selected_roundness = []
-            
-            for poly_id, polygon in enumerate(selected_polygons):
-                if not polygon or len(polygon) < 3:
-                    selected_areas.append(0)
-                    selected_roundness.append(0)
-                    continue
-                poly_np = np.array(polygon, dtype=np.int32)
-                cv2.fillPoly(selected_id_mask, [poly_np], poly_id + 1)  # IDs start from 1
-                area = cv2.contourArea(poly_np)
-                roundness = calculate_roundness(poly_np)
-                selected_areas.append(area)
-                selected_roundness.append(roundness)
-            
-            # Vectorized HSV computation for all selected polygons at once
-            logger.info(f"detect_from_selected_endpoint: Flattening HSV channels for vectorized processing")
-            h_channel = full_hsv[:, :, 0].ravel()
-            s_channel = full_hsv[:, :, 1].ravel()
-            v_channel = full_hsv[:, :, 2].ravel()
-            mask_flat = selected_id_mask.ravel()
-            logger.info(f"detect_from_selected_endpoint: Channels flattened, computing properties")
-            
-            selected_properties = []
-            for poly_id in range(1, len(selected_polygons) + 1):
-                # Get pixels belonging to this polygon
-                poly_pixels = mask_flat == poly_id
-                if not np.any(poly_pixels):
-                    continue
-                
-                # Compute mean HSV using vectorized operations
-                h_mean = float(np.mean(h_channel[poly_pixels]))
-                s_mean = float(np.mean(s_channel[poly_pixels]))
-                v_mean = float(np.mean(v_channel[poly_pixels]))
-                
-                # Get polygon properties
-                polygon = selected_polygons[poly_id - 1]
-                poly_np = np.array(polygon, dtype=np.int32)
-                
-                # Calculate centroid
-                M = cv2.moments(poly_np)
-                if M["m00"] != 0:
-                    cx = int(M["m10"] / M["m00"])
-                    cy = int(M["m01"] / M["m00"])
-                else:
-                    x, y, w, h = cv2.boundingRect(poly_np)
-                    cx, cy = x + w//2, y + h//2
-                
-                selected_properties.append({
-                    'area': selected_areas[poly_id - 1],
-                    'roundness': selected_roundness[poly_id - 1],
-                    'h_mean': h_mean,
-                    'h_std': 0.0,  # Not needed for selected cells
-                    's_mean': s_mean,
-                    's_std': 0.0,
-                    'v_mean': v_mean,
-                    'v_std': 0.0,
-                    'bbox': cv2.boundingRect(poly_np),
-                    'centroid': (cx, cy)
-                })
-            
-            # Clean up selected cell processing variables
-            del selected_id_mask
-            del h_channel
-            del s_channel
-            del v_channel
-            del mask_flat
-            del selected_areas
-            del selected_roundness
-            logger.info(f"detect_from_selected_endpoint: Cleaned up selected cell processing variables")
-        else:
-            selected_properties = []
 
-        if not selected_properties:
-            logger.error("detect_from_selected_endpoint: Failed to extract properties from selected cells")
-            return jsonify({"error": "Failed to extract properties from selected cells"}), 400
+        # if selected_polygons:
+        #     # Precompute full HSV for speed
+        #     logger.info(f"detect_from_selected_endpoint: Converting image to HSV (shape: {image.shape})")
+        #     full_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        #     logger.info(f"detect_from_selected_endpoint: HSV conversion complete")
+            
+        #     # Create polygon ID mask for selected polygons - each gets a unique ID
+        #     logger.info(f"detect_from_selected_endpoint: Creating polygon masks")
+        #     selected_id_mask = np.zeros(image.shape[:2], dtype=np.int32)
+        #     selected_areas = []
+        #     selected_roundness = []
+            
+        #     for poly_id, polygon in enumerate(selected_polygons):
+        #         if not polygon or len(polygon) < 3:
+        #             selected_areas.append(0)
+        #             selected_roundness.append(0)
+        #             continue
+        #         poly_np = np.array(polygon, dtype=np.int32)
+        #         cv2.fillPoly(selected_id_mask, [poly_np], poly_id + 1)  # IDs start from 1
+        #         area = cv2.contourArea(poly_np)
+        #         roundness = calculate_roundness(poly_np)
+        #         selected_areas.append(area)
+        #         selected_roundness.append(roundness)
+            
+        #     # Vectorized HSV computation for all selected polygons at once
+        #     logger.info(f"detect_from_selected_endpoint: Flattening HSV channels for vectorized processing")
+        #     h_channel = full_hsv[:, :, 0].ravel()
+        #     s_channel = full_hsv[:, :, 1].ravel()
+        #     v_channel = full_hsv[:, :, 2].ravel()
+        #     mask_flat = selected_id_mask.ravel()
+        #     logger.info(f"detect_from_selected_endpoint: Channels flattened, computing properties")
+            
+        #     selected_properties = []
+        #     for poly_id in range(1, len(selected_polygons) + 1):
+        #         # Get pixels belonging to this polygon
+        #         poly_pixels = mask_flat == poly_id
+        #         if not np.any(poly_pixels):
+        #             continue
+                
+        #         # Compute mean HSV using vectorized operations
+        #         h_mean = float(np.mean(h_channel[poly_pixels]))
+        #         s_mean = float(np.mean(s_channel[poly_pixels]))
+        #         v_mean = float(np.mean(v_channel[poly_pixels]))
+                
+        #         # Get polygon properties
+        #         polygon = selected_polygons[poly_id - 1]
+        #         poly_np = np.array(polygon, dtype=np.int32)
+                
+        #         # Calculate centroid
+        #         M = cv2.moments(poly_np)
+        #         if M["m00"] != 0:
+        #             cx = int(M["m10"] / M["m00"])
+        #             cy = int(M["m01"] / M["m00"])
+        #         else:
+        #             x, y, w, h = cv2.boundingRect(poly_np)
+        #             cx, cy = x + w//2, y + h//2
+                
+        #         selected_properties.append({
+        #             'area': selected_areas[poly_id - 1],
+        #             'roundness': selected_roundness[poly_id - 1],
+        #             'h_mean': h_mean,
+        #             'h_std': 0.0,  # Not needed for selected cells
+        #             's_mean': s_mean,
+        #             's_std': 0.0,
+        #             'v_mean': v_mean,
+        #             'v_std': 0.0,
+        #             'bbox': cv2.boundingRect(poly_np),
+        #             'centroid': (cx, cy)
+        #         })
+            
+        #     # Clean up selected cell processing variables
+        #     del selected_id_mask
+        #     del h_channel
+        #     del s_channel
+        #     del v_channel
+        #     del mask_flat
+        #     del selected_areas
+        #     del selected_roundness
+        #     logger.info(f"detect_from_selected_endpoint: Cleaned up selected cell processing variables")
+        # else:
+        #     selected_properties = []
 
+        # if not selected_properties:
+        #     logger.error("detect_from_selected_endpoint: Failed to extract properties from selected cells")
+        #     return jsonify({"error": "Failed to extract properties from selected cells"}), 400\
+              # Precompute full HSV image once. It will be reused for candidate filtering.
+        logger.info(f"detect_from_selected_endpoint: Converting image to HSV (shape: {image.shape})")
+        full_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        logger.info(f"detect_from_selected_endpoint: HSV conversion complete")
+        selected_properties = _calculate_polygon_properties_vectorized(selected_polygons, full_hsv)
         logger.info(f"detect_from_selected_endpoint: Successfully extracted properties from {len(selected_properties)} selected cells")
         
         # Clean up selected polygons - no longer needed
