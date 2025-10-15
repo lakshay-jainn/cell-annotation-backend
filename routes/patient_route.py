@@ -108,8 +108,23 @@ def get_patients(decoded_token):
             }
             items_with_status.append((is_completed, patient_data))
 
-        # Sort: In Progress (False) first, then Completed (True), within each group by created_at desc
-        items_with_status.sort(key=lambda x: (x[0], -x[1]["created_at"].timestamp()))
+            def _safe_sort_key(item):
+                completed_flag, pdata = item
+           
+                try:
+                    completed = 1 if bool(completed_flag) else 0
+                except Exception:
+                   completed = 0
+
+                created = pdata.get("created_at")
+                try:
+                    ts = created.timestamp() if created is not None else 0
+                except Exception:
+                    ts = 0
+
+                return (completed, -ts)
+
+            items_with_status.sort(key=_safe_sort_key)
 
         # Extract just the patient data (remove completion flag)
         paginated_items = [item[1] for item in items_with_status]
