@@ -76,7 +76,7 @@ def _process_chunk_vectorized(polygon_chunk, full_hsv):
         
     return chunk_properties
 
-def calculate_properties_in_chunks(all_polygons, bgr_image, chunk_size=500):
+def calculate_properties_in_chunks(all_polygons, bgr_image, full_hsv,chunk_size=500):
     """
     Orchestrator that processes all polygons in memory-safe chunks.
     """
@@ -836,7 +836,7 @@ def detect_from_selected_endpoint(decoded_token):
         logger.info(f"detect_from_selected_endpoint: HSV conversion complete")
         # selected_properties = _calculate_polygon_properties_vectorized(selected_polygons, full_hsv)
         selected_chunk_size = get_dynamic_chunk_size(image.shape[:2], len(selected_polygons))
-        selected_properties = calculate_properties_in_chunks(selected_polygons, image, chunk_size=selected_chunk_size)
+        selected_properties = calculate_properties_in_chunks(selected_polygons, image,full_hsv, chunk_size=selected_chunk_size)
 
         logger.info(f"detect_from_selected_endpoint: Successfully extracted properties from {len(selected_properties)} selected cells")
         
@@ -990,7 +990,7 @@ def detect_from_selected_endpoint(decoded_token):
             candidate_chunk_size = get_dynamic_chunk_size(image.shape[:2], len(prefiltered_coords))
 
             # Calculate all candidate properties using the orchestrator
-            candidate_properties = calculate_properties_in_chunks(prefiltered_coords, image, chunk_size=candidate_chunk_size)
+            candidate_properties = calculate_properties_in_chunks(prefiltered_coords, image, full_hsv,chunk_size=candidate_chunk_size)
 
             # Now filter the results in a simple Python loop (very fast, low memory)
             for props in candidate_properties:
