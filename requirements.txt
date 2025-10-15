@@ -20,6 +20,7 @@ scikit-image
 scipy 
 scikit-learn
 opencv-python-headless
+Pillow
 psutil
 # Production task queue with SQS
 celery[sqs]
