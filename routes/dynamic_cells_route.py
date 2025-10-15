@@ -685,7 +685,7 @@ def detect_from_selected_endpoint(decoded_token):
             
             # Create polygon ID mask - each polygon gets a unique ID
             logger.info(f"detect_from_selected_endpoint: Creating polygon ID mask (image shape: {image.shape[:2]})")
-            polygon_id_mask = np.zeros(image.shape[:2], dtype=np.int32)
+            polygon_id_mask = np.zeros(image.shape[:2], dtype=np.int16)
             polygon_areas = []
             
             for poly_id, polygon in enumerate(polygon_coords):
