@@ -2,7 +2,9 @@
 import os
 import uuid
 import botocore
+import io
 from datetime import datetime
+from PIL import Image
 from db.models import db, Sample, Patient, PatientAnnotation
 from flask import Blueprint, jsonify, request, current_app
 from utilities.auth_utility import protected
@@ -174,15 +176,61 @@ def upload_img(decoded_token):
     s3_prefix = f"uploads/original/{job_id}/"
     s3_object_key = f"{s3_prefix}original{ext}"
 
+    # Strip EXIF data before uploading to S3
+    try:
+        # Read image file
+        file.stream.seek(0)  # Reset stream position
+        img = Image.open(file.stream)
+        
+        # Create a new image with the same pixels but no EXIF/metadata
+        clean_img = Image.new(img.mode, img.size)
+        clean_img.putdata(list(img.getdata()))
+        
+        # Save to bytes buffer
+        img_buffer = io.BytesIO()
+        # Preserve original format if possible, default to JPEG
+        img_format = img.format if img.format else 'JPEG'
+        clean_img.save(img_buffer, format=img_format, quality=95)
+        img_buffer.seek(0)
+        
+        # Create a file-like object for upload
+        class FileWrapper:
+            def __init__(self, buffer):
+                self.stream = buffer
+                self.filename = file.filename
+        
+        clean_file = FileWrapper(img_buffer)
+        
+        ActivityLogger.log_workflow_step(
+            user_id=user_id,
+            user_role=user_role,
+            workflow_type="upload",
+            step="exif_stripped",
+            step_data={"job_id": job_id, "original_format": img.format, "mode": img.mode}
+        )
+    except Exception as e:
+        ActivityLogger.log_activity(
+            user_id=user_id,
+            user_role=user_role,
+            action_type="upload_error",
+            action_details="exif_strip_failed",
+            status="error",
+            metadata={"job_id": job_id, "error": str(e)}
+        )
+        current_app.logger.warning(f"Failed to strip EXIF data, uploading original file: {e}")
+        # Fall back to original file if EXIF stripping fails
+        file.stream.seek(0)
+        clean_file = file
+
     # Upload file to S3
     try:
-        upload_to_s3(S3_BUCKET_NAME,file,s3_object_key)
+        upload_to_s3(S3_BUCKET_NAME, clean_file, s3_object_key)
         ActivityLogger.log_workflow_step(
             user_id=user_id,
             user_role=user_role,
             workflow_type="upload",
             step="s3_upload_success",
-            step_data={"job_id": job_id, "s3_key": s3_object_key, "file_size": file.content_length}
+            step_data={"job_id": job_id, "s3_key": s3_object_key}
         )
     except Exception as e:
         ActivityLogger.log_activity(
