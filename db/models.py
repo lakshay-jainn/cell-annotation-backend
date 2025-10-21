@@ -7,8 +7,10 @@ from flask_login import UserMixin
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy import exists
 from sqlalchemy.orm import declarative_base
+from flask_migrate import Migrate
 
 db = SQLAlchemy()
+migrate = Migrate()
 
 # Create a Base class for direct SQLAlchemy usage (for background processes)
 Base = declarative_base()
@@ -23,12 +25,21 @@ class UserRole(enum.Enum):
     
 class Patient(db.Model):
     __tablename__ = "patients"
-    
+    __table_args__ = (
+    db.UniqueConstraint('pulmonologist_id', 'user_typed_id', name='uq_pulmo_typedid'),
+    )
     patient_id = db.Column(db.String(36), primary_key=True, default=gen_uuid)
-    user_typed_id = db.Column(db.String(100), nullable=False, unique=True, index=True)  # The ID entered by pulmonologist
+    user_typed_id = db.Column(db.String(100), nullable=False, index=True)  # The ID entered by pulmonologist
     
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    # Foreign key to User (pulmonologist who uploaded the patient)
+    pulmonologist_id = db.Column(db.String(36), db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    pulmonologist = db.relationship("User", backref="uploaded_patients", lazy="select")
+
+    # S3 key for pulmonologist report
+    pulmonologist_report_s3_key = db.Column(db.String(1024), nullable=True)
 
     # Relationship to samples
     samples = db.relationship(

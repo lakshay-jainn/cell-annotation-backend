@@ -4,6 +4,8 @@ gunicorn
 boto3
 requests
 flask-sqlalchemy
+flask-migrate
+alembic
 psycopg2-binary
 PyJWT
 bcrypt
@@ -22,6 +24,7 @@ scikit-learn
 opencv-python-headless
 Pillow
 psutil
-# Production task queue with SQS
-celery[sqs]
-kombu[sqs]
+python-dotenv
+# # Production task queue with SQS
+# celery[sqs]
+# kombu[sqs]

@@ -13,7 +13,7 @@ from flask_session import Session
 
 
 # import your models and admin views
-from db.models import db, User, Sample, SampleAnnotation, PatientAnnotation, UserRole, Patient, UserActivityLog
+from db.models import db,migrate, User, Sample, SampleAnnotation, PatientAnnotation, UserRole, Patient, UserActivityLog
 from admin_views import UserAdmin, SampleAdmin, SampleAnnotationAdmin, PatientAnnotationAdmin, AuthIndexView, PatientAdmin, ModelProcessingView, UserActivityLogAdmin
 
 # blueprint(s)
@@ -74,7 +74,7 @@ def create_app():
 
     # initialize DB
     db.init_app(app)
-    
+    migrate.init_app(app, db)
     # Initialize server-side sessions (after db.init_app)
     with app.app_context():
         try:
@@ -128,7 +128,7 @@ def create_app():
         print("� Creating database tables...", flush=True)
         try:
             # db.drop_all()
-            db.create_all()
+            # db.create_all()
             print("✅ Database tables created successfully", flush=True)
         except Exception as e:
             print(f"❌ Error creating database tables: {e}", flush=True)

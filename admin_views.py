@@ -65,11 +65,13 @@ class UserAdmin(AuthModelView):
 
 class PatientAdmin(AuthModelView):
     """Admin view for Patient management."""
-    column_list = ("patient_id", "user_typed_id", "total_samples", "total_sample_annotations", "total_patient_annotations", "created_at", "updated_at")
+    column_list = ("patient_id", "user_typed_id", "total_samples", "total_sample_annotations", "total_patient_annotations", "pulmonologist_report_s3_key" ,"pulmonologist_id","created_at", "updated_at")
     column_labels = {
         'patient_id': 'Patient ID',
         'user_typed_id': 'User Typed ID',
         'total_samples': '# Samples',
+        'pulmonologist_id': 'Pulmonologist ID',
+        'pulmonologist_report_s3_key': 'S3 Report Key',
         'total_sample_annotations': '# Sample Annotations',
         'total_patient_annotations': '# Patient Annotations'
     }

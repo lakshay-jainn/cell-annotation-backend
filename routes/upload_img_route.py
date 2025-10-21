@@ -8,7 +8,7 @@ from PIL import Image
 from db.models import db, Sample, Patient, PatientAnnotation
 from flask import Blueprint, jsonify, request, current_app
 from utilities.auth_utility import protected
-
+from utilities.image_utility import FileWrapper
 from utilities.aws_utility import upload_to_s3
 from utilities.logging_utility import ActivityLogger
 
@@ -35,7 +35,6 @@ def upload_img(decoded_token):
         step_data={"endpoint": "upload_img"}
     )
     
-    print(decoded_token)
     if decoded_token["role"] != "UPLOADER":
         current_app.logger.warning(f"Unauthorized upload attempt - user_id: {user_id}, role: {user_role}")
         ActivityLogger.log_activity(
@@ -102,7 +101,7 @@ def upload_img(decoded_token):
     if not patient:
         # Create new patient
         current_app.logger.info(f"Creating new patient with user_typed_id: {user_typed_patient_id}")
-        patient = Patient(user_typed_id=user_typed_patient_id)
+        patient = Patient(user_typed_id=user_typed_patient_id, pulmonologist_id=user_id)
         try:
             db.session.add(patient)
             db.session.commit()
@@ -206,13 +205,8 @@ def upload_img(decoded_token):
         img.save(img_buffer, format=img_format, quality=95)
         img_buffer.seek(0)
         
-        # Create a file-like object for upload
-        class FileWrapper:
-            def __init__(self, buffer):
-                self.stream = buffer
-                self.filename = file.filename
         
-        clean_file = FileWrapper(img_buffer)
+        clean_file = FileWrapper(img_buffer, file)
         
         current_app.logger.info(f"EXIF stripping successful - job_id: {job_id}, format: {img_format}, mode: {img.mode}, size: {img.size}")
         ActivityLogger.log_workflow_step(
