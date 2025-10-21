@@ -4,7 +4,7 @@ from utilities.logging_utility import ActivityLogger
 from utilities.aws_utility import upload_to_s3, S3_BUCKET_NAME, get_presigned_url
 from db.models import Patient, db
 import os
-
+from sqlalchemy import case
 pulmo_route_bp = Blueprint('pulmo_route', __name__ )
 
 @pulmo_route_bp.route('/pulmo/upload-report', methods=['POST'])
@@ -237,7 +237,19 @@ def get_patients(decoded_token):
     # Pagination
     page = request.args.get("page", default=1, type=int)
     per_page = request.args.get("per_page", default=10, type=int)
-    patients = Patient.query.filter_by(pulmonologist_id=user_id).paginate(page=page, per_page=per_page, error_out=False)
+
+
+    null_first_order = case(
+        (Patient.pulmonologist_report_s3_key == None, 0),
+        else_=1
+    )
+
+    patients = (
+        Patient.query
+        .filter_by(pulmonologist_id=user_id)
+        .order_by(null_first_order.asc(), Patient.created_at.desc())
+        .paginate(page=page, per_page=per_page, error_out=False)
+    )
 
     paginated_items = []
     for patient in patients.items:
