@@ -96,11 +96,13 @@ def upload_img(decoded_token):
         return jsonify({"message": "Patient ID is required"}), 400
 
     # Handle patient creation/lookup
-    current_app.logger.info(f"Looking up patient with user_typed_id: {user_typed_patient_id}")
-    patient = Patient.query.filter_by(user_typed_id=user_typed_patient_id).first()
+    # IMPORTANT: Must filter by both pulmonologist_id and user_typed_id to ensure each pulmonologist
+    # has their own patient record. user_typed_id is for pulmonologist reference only and is scoped per pulmonologist.
+    current_app.logger.info(f"Looking up patient with pulmonologist_id: {user_id}, user_typed_id: {user_typed_patient_id}")
+    patient = Patient.query.filter_by(pulmonologist_id=user_id, user_typed_id=user_typed_patient_id).first()
     if not patient:
         # Create new patient
-        current_app.logger.info(f"Creating new patient with user_typed_id: {user_typed_patient_id}")
+        current_app.logger.info(f"Creating new patient with pulmonologist_id: {user_id}, user_typed_id: {user_typed_patient_id}")
         patient = Patient(user_typed_id=user_typed_patient_id, pulmonologist_id=user_id)
         try:
             db.session.add(patient)
