@@ -102,7 +102,7 @@ class SampleAdmin(AuthModelView):
     column_searchable_list = ("job_id", "original_filename", "patient_id")
     column_filters = ("inference_status", "node_station", "needle_size", "sample_type", "microscope", "stain", "created_at")
     column_sortable_list = ("created_at", "updated_at", "inference_status")
-    form_excluded_columns = ("sample_annotations", "patient", "uploader")
+    form_excluded_columns = ("sample_annotations", "uploader")
     
     # Add custom columns
     column_formatters = {
