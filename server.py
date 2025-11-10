@@ -60,8 +60,8 @@ def create_app():
     app.config['SESSION_SQLALCHEMY'] = db
     app.config['SESSION_SQLALCHEMY_TABLE'] = 'sessions'
 
-    print(f"App SECRET_KEY: {SECRET_KEY[:10]}...")
-    print(f"Database URI: {SQL_URI}")
+    
+    
 
     # init optional limiter
     if limiter:
