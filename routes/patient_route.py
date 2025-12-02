@@ -5,6 +5,7 @@ from utilities.auth_utility import protected
 from utilities.aws_utility import get_presigned_url
 from utilities.logging_utility import ActivityLogger
 from datetime import datetime
+from sqlalchemy import func, case
 import logging
 import json
 
@@ -49,52 +50,85 @@ def get_patients(decoded_token):
         )
         return jsonify({"message": "Unauthorized Access"}), 401
 
-    # Get pagination parameters
     page = int(request.args.get("page", 1))
     per_page = int(request.args.get("per_page", 10))
 
     try:
-        # Get patients with their samples, ordered by patient annotation completion status
-        # Use DB-side pagination to avoid loading all rows into memory
-        patients_with_samples = (
-            Patient.query
-            .join(Sample, Patient.patient_id == Sample.patient_id)
+        # Subquery: count of completed samples per patient
+        total_samples_sq = (
+            db.session.query(
+                Sample.patient_id,
+                func.count(Sample.job_id).label('total')
+            )
             .filter(Sample.inference_status == 'completed')
-            .distinct()
-            .order_by(Patient.created_at.desc())
+            .group_by(Sample.patient_id)
+            .subquery()
+        )
+
+        # Subquery: count of user's annotations per patient
+        annotated_sq = (
+            db.session.query(
+                SampleAnnotation.patient_id,
+                func.count(SampleAnnotation.id).label('annotated')
+            )
+            .filter(SampleAnnotation.user_id == user_id)
+            .group_by(SampleAnnotation.patient_id)
+            .subquery()
+        )
+
+        # Subquery: user's patient annotation completion status
+        patient_annot_sq = (
+            db.session.query(
+                PatientAnnotation.patient_id,
+                PatientAnnotation.annotation_completed
+            )
+            .filter(PatientAnnotation.user_id == user_id)
+            .subquery()
+        )
+
+        # is_completed: 0 = in-progress (show first), 1 = completed
+        is_completed = case(
+            (
+                (total_samples_sq.c.total > 0) &
+                (func.coalesce(annotated_sq.c.annotated, 0) == total_samples_sq.c.total) &
+                (patient_annot_sq.c.annotation_completed == True),
+                1
+            ),
+            else_=0
+        )
+
+        # Query with ORDER BY before pagination
+        patients_paginated = (
+            Patient.query
+            .join(total_samples_sq, Patient.patient_id == total_samples_sq.c.patient_id)
+            .outerjoin(annotated_sq, Patient.patient_id == annotated_sq.c.patient_id)
+            .outerjoin(patient_annot_sq, Patient.patient_id == patient_annot_sq.c.patient_id)
+            .order_by(is_completed.asc(), Patient.created_at.desc())  # In-progress first
             .paginate(page=page, per_page=per_page, error_out=False)
         )
 
-        # Build items list with completion status for sorting within the current page
-        items_with_status = []
-        for patient in patients_with_samples.items:
-            # Get user's sample annotations for this patient
+        # Build response
+        paginated_items = []
+        for patient in patients_paginated.items:
             user_sample_annotations = SampleAnnotation.query.filter_by(
-                user_id=decoded_token["user_id"],
-                patient_id=patient.patient_id
+                user_id=user_id, patient_id=patient.patient_id
             ).all()
             
-            # Get user's patient annotation for this patient
             user_patient_annotation = PatientAnnotation.query.filter_by(
-                user_id=decoded_token["user_id"],
-                patient_id=patient.patient_id
+                user_id=user_id, patient_id=patient.patient_id
             ).first()
 
-            annotated_sample_ids = {ann.sample_id for ann in user_sample_annotations}
-            
-            # Count total samples and annotated samples for this patient
             total_samples = len([s for s in patient.samples if s.inference_status == 'completed'])
-            annotated_samples = len(annotated_sample_ids)
+            annotated_samples = len(user_sample_annotations)
             
-            # Check completion status based on sample annotations AND patient annotation
-            samples_completed = bool(annotated_samples == total_samples and total_samples > 0)
-            patient_annotation_completed = bool(user_patient_annotation and bool(getattr(user_patient_annotation, "annotation_completed", False)))
-            is_completed = bool(samples_completed and patient_annotation_completed)
-            created_at_val = patient.created_at if getattr(patient, "created_at", None) is not None else datetime.utcfromtimestamp(0)
-            patient_data = {
+            samples_done = (annotated_samples == total_samples and total_samples > 0)
+            patient_done = bool(user_patient_annotation and user_patient_annotation.annotation_completed)
+            is_done = samples_done and patient_done
+
+            paginated_items.append({
                 "patient_id": patient.patient_id,
                 "user_typed_id": patient.user_typed_id,
-                "annotation_completed": is_completed,
+                "annotation_completed": is_done,
                 "adequacy": user_patient_annotation.adequacy if user_patient_annotation else None,
                 "inadequacy_reason": user_patient_annotation.inadequacy_reason if user_patient_annotation else None,
                 "provisional_diagnosis": user_patient_annotation.provisional_diagnosis if user_patient_annotation else None,
@@ -102,32 +136,9 @@ def get_patients(decoded_token):
                 "total_samples": total_samples,
                 "annotated_samples": annotated_samples,
                 "progress_percentage": (annotated_samples / total_samples * 100) if total_samples > 0 else 0,
-                "created_at": created_at_val,
-                # Add cell count summary for completed patients
-                "cell_summary": get_patient_cell_summary(patient.patient_id, decoded_token["user_id"]) if is_completed else None
-            }
-            items_with_status.append((is_completed, patient_data))
-
-            def _safe_sort_key(item):
-                completed_flag, pdata = item
-           
-                try:
-                    completed = 1 if bool(completed_flag) else 0
-                except Exception:
-                   completed = 0
-
-                created = pdata.get("created_at")
-                try:
-                    ts = created.timestamp() if created is not None else 0
-                except Exception:
-                    ts = 0
-
-                return (completed, -ts)
-
-            items_with_status.sort(key=_safe_sort_key)
-
-        # Extract just the patient data (remove completion flag)
-        paginated_items = [item[1] for item in items_with_status]
+                "created_at": patient.created_at or datetime.utcfromtimestamp(0),
+                "cell_summary": get_patient_cell_summary(patient.patient_id, user_id) if is_done else None
+            })
 
         ActivityLogger.log_activity(
             user_id=user_id,
@@ -135,14 +146,14 @@ def get_patients(decoded_token):
             action_type="api_call",
             action_details="get_patients_list",
             status="success",
-            metadata={"page": page, "per_page": per_page, "total_patients": patients_with_samples.total}
+            metadata={"page": page, "per_page": per_page, "total_patients": patients_paginated.total}
         )
 
         return jsonify({
-            "page": patients_with_samples.page,
-            "per_page": patients_with_samples.per_page,
-            "total": patients_with_samples.total,
-            "pages": patients_with_samples.pages,
+            "page": patients_paginated.page,
+            "per_page": patients_paginated.per_page,
+            "total": patients_paginated.total,
+            "pages": patients_paginated.pages,
             "items": paginated_items
         }), 200
         
