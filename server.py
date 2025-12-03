@@ -205,7 +205,7 @@ def create_app():
         return redirect(url_for("admin_login"))
 
     # --- Setup Flask-Admin ---
-    admin = Admin(app, name="Cell Annotation Admin", template_mode="bootstrap3", index_view=AuthIndexView())
+    admin = Admin(app, name="Cell Annotation Admin", index_view=AuthIndexView())
     admin.add_view(UserAdmin(User, db.session, name="Users"))
     admin.add_view(PatientAdmin(Patient, db.session, name="Patients"))
     admin.add_view(SampleAdmin(Sample, db.session, name="Samples"))
